@@ -18,6 +18,7 @@ function poseApiPlugin() {
 }
 
 export default defineConfig({
+    base: './',
     plugins: [poseApiPlugin()],
     server: {
         host: '0.0.0.0',
