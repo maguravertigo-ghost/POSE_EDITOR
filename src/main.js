@@ -236,7 +236,9 @@ function renderTreeNode(joint, depth) {
 
     const toggle = document.createElement('span');
     toggle.className = 'tree-toggle';
-    toggle.textContent = hasChildren ? (isHand ? '▸' : '▾') : '';
+    if (hasChildren) {
+        toggle.innerHTML = `<span class="material-icons sm">${isHand ? 'chevron_right' : 'expand_more'}</span>`;
+    }
     row.appendChild(toggle);
 
     const label = document.createElement('span');
@@ -258,7 +260,7 @@ function renderTreeNode(joint, depth) {
         toggle.addEventListener('click', (e) => {
             e.stopPropagation();
             const collapsed = childrenBox.classList.toggle('collapsed');
-            toggle.textContent = collapsed ? '▸' : '▾';
+            toggle.innerHTML = `<span class="material-icons sm">${collapsed ? 'chevron_right' : 'expand_more'}</span>`;
         });
     }
 
@@ -316,7 +318,7 @@ function updateHUD() {
     gizmoMoveBtn.style.display = j.userData.isRoot ? '' : 'none';
     gizmoRotateBtn.classList.toggle('active', appState.gizmoMode === 'rotate');
     gizmoMoveBtn.classList.toggle('active', appState.gizmoMode === 'translate');
-    gizmoSpaceBtn.textContent = appState.gizmoSpace === 'local' ? 'Локально' : 'Мир';
+    gizmoSpaceBtn.innerHTML = `<span class="material-icons sm">public</span> ${appState.gizmoSpace === 'local' ? 'Локально' : 'Мир'}`;
 
     const rv = [j.rotation.x, j.rotation.y, j.rotation.z];
     rotInputs.forEach((inp, i) => {
@@ -393,7 +395,7 @@ function renderPropsList() {
         span.textContent = p.userData.propLabel;
         const del = document.createElement('button');
         del.className = 'prop-del';
-        del.textContent = '✕';
+        del.innerHTML = '<span class="material-icons sm">close</span>';
         del.addEventListener('click', (e) => {
             e.stopPropagation();
             if (appState.selectedProp === p) selectProp(null);
@@ -606,10 +608,47 @@ document.querySelectorAll('.mode-tab').forEach((btn) => {
     btn.addEventListener('click', () => switchEditorMode(btn.dataset.mode));
 });
 
+const sketchPipEl = document.getElementById('sketchPip');
+const pipViewportEl = document.getElementById('pipViewport');
+const btnPip = document.getElementById('btnPip');
+sceneMgr.pip.viewportEl = pipViewportEl;
+
+function syncPipVisibility() {
+    const show = sceneMgr.pip.enabled && sceneMgr.sketch.settings.mode === '3d';
+    sketchPipEl.classList.toggle('hidden', !show);
+    btnPip.classList.toggle('active', sceneMgr.pip.enabled);
+}
+
+btnPip.addEventListener('click', () => {
+    sceneMgr.pip.enabled = !sceneMgr.pip.enabled;
+    syncPipVisibility();
+});
+document.getElementById('pipClose').addEventListener('click', () => {
+    sceneMgr.pip.enabled = false;
+    syncPipVisibility();
+});
+document.getElementById('pipModeLine').addEventListener('click', () => {
+    sceneMgr.pip.mode = 'sketch-line';
+    document.getElementById('pipModeLine').classList.add('active');
+    document.getElementById('pipModeTone').classList.remove('active');
+});
+document.getElementById('pipModeTone').addEventListener('click', () => {
+    sceneMgr.pip.mode = 'sketch-tone';
+    document.getElementById('pipModeTone').classList.add('active');
+    document.getElementById('pipModeLine').classList.remove('active');
+});
+document.getElementById('pipExpand').addEventListener('click', () => {
+    const targetMode = sceneMgr.pip.mode;
+    sceneMgr.sketch.settings.mode = targetMode;
+    document.querySelectorAll('.render-tab').forEach((b) => b.classList.toggle('active', b.dataset.render === targetMode));
+    syncPipVisibility();
+});
+
 document.querySelectorAll('.render-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
         sceneMgr.sketch.settings.mode = btn.dataset.render;
         document.querySelectorAll('.render-tab').forEach((b) => b.classList.toggle('active', b === btn));
+        syncPipVisibility();
     });
 });
 
@@ -820,7 +859,7 @@ async function openBrowser(type) {
         meta.textContent = it.savedAt ? new Date(it.savedAt).toLocaleString() : (it.mtime ? new Date(it.mtime).toLocaleString() : '');
         const del = document.createElement('button');
         del.className = 'b-del';
-        del.textContent = '🗑';
+        del.innerHTML = '<span class="material-icons sm">delete</span>';
 
         row.append(name, meta, del);
         row.addEventListener('click', async (e) => {
@@ -997,7 +1036,7 @@ function renderPoseMenu() {
     }
     list.appendChild(document.createElement('hr'));
     const serverBtn = document.createElement('button');
-    serverBtn.textContent = '📥 Загрузить из библиотеки сервера…';
+    serverBtn.innerHTML = '<span class="material-icons sm">cloud_download</span> Из библиотеки сервера…';
     serverBtn.addEventListener('click', async () => {
         closeAllMenus();
         if (await checkServer()) openBrowser('poses');

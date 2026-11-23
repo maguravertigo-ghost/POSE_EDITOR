@@ -60,6 +60,7 @@ export class SceneManager {
         this.sketch = new SketchRenderer(this.renderer);
         this.helperObjects = [this.grid, this.transformHelper];
         this.bgTexture = null;
+        this.pip = { enabled: true, mode: 'sketch-tone', viewportEl: null };
 
         this.onTransformChange = null;
         this.onTransformEnd = null;
@@ -196,12 +197,43 @@ export class SceneManager {
     render(extraHelpers = [], guideObjects = [], showGuides = true) {
         this.orbit.update();
         const helpers = [...this.helperObjects, ...extraHelpers];
+        const stageW = this.container.clientWidth;
+        const stageH = this.container.clientHeight;
+        this.renderer.setScissorTest(false);
+        this.renderer.setViewport(0, 0, stageW, stageH);
+
         this.sketch.render(this.scene, this.camera, {
             helperObjects: helpers,
             guideObjects,
             showGuides,
             floorMesh: this.ground
         });
+
+        // Live Final Sketch Preview PiP in 3D editing mode
+        if (this.pip.enabled && this.sketch.settings.mode === '3d' && this.pip.viewportEl) {
+            const cRect = this.canvas.getBoundingClientRect();
+            const pRect = this.pip.viewportEl.getBoundingClientRect();
+            if (pRect.width > 20 && pRect.height > 20) {
+                const x = pRect.left - cRect.left;
+                const yBottom = cRect.bottom - pRect.bottom;
+                this.sketch.renderQuadToRect(
+                    this.scene,
+                    this.camera,
+                    x,
+                    yBottom,
+                    pRect.width,
+                    pRect.height,
+                    {
+                        forceMode: this.pip.mode,
+                        helperObjects: helpers,
+                        guideObjects,
+                        showGuides,
+                        floorMesh: this.ground
+                    }
+                );
+                this.renderer.setViewport(0, 0, cRect.width, cRect.height);
+            }
+        }
     }
 
     exportFramePNG(extraHelpers = [], guideObjects = [], showGuides = true, width = 1600, height = 1200) {

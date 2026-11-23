@@ -1,3 +1,31 @@
+@font-face {
+    font-family: 'Material Icons';
+    font-style: normal;
+    font-weight: 400;
+    src: url('../../icons/MaterialIcons-Regular.woff2') format('woff2');
+}
+
+.material-icons {
+    font-family: 'Material Icons';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 16px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
+    vertical-align: middle;
+}
+
+.material-icons.sm { font-size: 14px; }
+.material-icons.lg { font-size: 18px; }
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
 
@@ -51,8 +79,27 @@ button, select {
     transition: background .15s, border-color .15s, color .15s;
 }
 button {
-    padding: 6px 10px;
+    padding: 5px 10px;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+}
+.menu-list button {
+    justify-content: flex-start;
+    gap: 8px;
+}
+.logo {
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    color: #6ea8ff;
+    font-size: 13px;
+    flex: 0 0 auto;
+    margin-right: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 button:hover { background: #2a3242; border-color: #46536b; color: #fff; }
 button:active { transform: scale(.98); }
@@ -394,6 +441,62 @@ input[type="range"] {
     border-radius: 6px;
     pointer-events: none;
     z-index: 10;
+}
+
+/* ---------- Live Final Sketch PiP Preview ---------- */
+#sketchPip {
+    position: absolute;
+    left: 12px;
+    bottom: 42px;
+    width: 240px;
+    background: #141923;
+    border: 1px solid #344157;
+    border-radius: 9px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .55);
+    overflow: hidden;
+    z-index: 16;
+    display: flex;
+    flex-direction: column;
+}
+#sketchPip.hidden { display: none; }
+
+.pip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 6px 8px;
+    background: #181e2a;
+    border-bottom: 1px solid #2b3446;
+    font-size: 11px;
+    font-weight: 600;
+    color: #cfe0ff;
+}
+.pip-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.pip-actions {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+.icon-btn {
+    padding: 3px 5px;
+    border-radius: 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #9ba7bc;
+}
+.icon-btn:hover { background: #263044; color: #fff; border-color: #3a4760; }
+.icon-btn.active { background: #203962; color: #8ec1ff; border-color: #4674bc; }
+
+.pip-viewport {
+    width: 100%;
+    height: 280px;
+    background: transparent;
+    pointer-events: none;
 }
 
 /* ---------- Modals ---------- */

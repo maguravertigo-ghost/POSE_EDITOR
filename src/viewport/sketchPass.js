@@ -14,6 +14,7 @@ precision highp float;
 uniform sampler2D tColor;
 uniform sampler2D tNormal;
 uniform sampler2D tDepth;
+uniform sampler2D tGuides;
 uniform vec2 uResolution;
 uniform float uNear;
 uniform float uFar;
@@ -23,6 +24,7 @@ uniform float uToneStrength;
 uniform float uHatchDensity;
 uniform vec3 uPaperColor;
 uniform vec3 uInkColor;
+uniform float uShowGuides;
 uniform int uMode; // 1 = pure contour, 2 = contour + tone/hatching
 
 varying vec2 vUv;
@@ -44,8 +46,8 @@ float sobelDepth(vec2 uv, vec2 texel) {
 
     float gx = -d00 - 2.0 * d01 - d02 + d20 + 2.0 * d21 + d22;
     float gy = -d00 - 2.0 * d10 - d20 + d02 + 2.0 * d12 + d22;
-    float center = max(0.2, linearizeDepth(texture2D(tDepth, uv).r));
-    return sqrt(gx * gx + gy * gy) / center;
+    float minD = min(min(min(d00, d20), min(d02, d22)), linearizeDepth(texture2D(tDepth, uv).r));
+    return sqrt(gx * gx + gy * gy) / max(0.35, minD);
 }
 
 float sobelNormal(vec2 uv, vec2 texel) {
@@ -64,42 +66,42 @@ float sobelNormal(vec2 uv, vec2 texel) {
 }
 
 void main() {
-    vec2 texel = uLineWidth / uResolution;
+    vec2 texel = uLineWidth / max(uResolution, vec2(1.0));
     float rawDepth = texture2D(tDepth, vUv).r;
     float isGeo = step(rawDepth, 0.9999);
 
-    float dEdge = sobelDepth(vUv, texel) * 2.2;
-    float nEdge = sobelNormal(vUv, texel) * 0.48;
+    float dEdge = sobelDepth(vUv, texel) * 2.1;
+    float nEdge = sobelNormal(vUv, texel) * 0.42;
     float edgeVal = max(dEdge, nEdge);
 
-    float line = smoothstep(uThreshold * 0.55, uThreshold * 1.15, edgeVal);
+    float line = smoothstep(uThreshold * 0.55, uThreshold * 1.12, edgeVal);
 
     vec3 baseCol = uPaperColor;
-    if (isGeo > 0.5) {
+    if (isGeo > 0.5 && uMode == 2) {
         vec4 col = texture2D(tColor, vUv);
         float lum = dot(col.rgb, vec3(0.299, 0.587, 0.114));
 
-        // Preserve faint construction guide lines (drawn darker on top of light mannequin fill)
-        float guideHint = smoothstep(0.50, 0.24, lum) * (1.0 - step(lum, 0.15));
+        // Clean 2-tone mannequin shading + subtle diagonal shading in deeper shadows
+        float shade = 1.0;
+        if (lum < 0.72) shade = 0.91;
+        if (lum < 0.54) shade = 0.82;
+        if (lum < 0.36) shade = 0.72;
 
-        if (uMode == 2) {
-            // Soft clean 2-tone mannequin shading + subtle diagonal shading in deep shadow
-            float shade = 1.0;
-            if (lum < 0.74) shade = 0.92;
-            if (lum < 0.56) shade = 0.83;
-            if (lum < 0.38) shade = 0.73;
-
-            vec2 frag = gl_FragCoord.xy;
-            float h1 = abs(sin((frag.x + frag.y) * uHatchDensity));
-            float hatch = 1.0;
-            if (lum < 0.44) {
-                hatch = mix(1.0, 0.86 + 0.14 * smoothstep(0.05, 0.35, h1), 0.55);
-            }
-
-            float toneFactor = mix(1.0, shade * hatch, uToneStrength);
-            baseCol = uPaperColor * toneFactor;
+        vec2 frag = gl_FragCoord.xy;
+        float h1 = abs(sin((frag.x + frag.y) * uHatchDensity));
+        float hatch = 1.0;
+        if (lum < 0.42) {
+            hatch = mix(1.0, 0.86 + 0.14 * smoothstep(0.05, 0.35, h1), 0.50);
         }
-        baseCol = mix(baseCol, uInkColor, guideHint * 0.28);
+
+        float toneFactor = mix(1.0, shade * hatch, uToneStrength);
+        baseCol = uPaperColor * toneFactor;
+    }
+
+    if (uShowGuides > 0.5) {
+        float gLum = dot(texture2D(tGuides, vUv).rgb, vec3(0.3333));
+        float guideLine = 1.0 - smoothstep(0.45, 0.96, gLum);
+        baseCol = mix(baseCol, uInkColor, guideLine * 0.42);
     }
 
     vec3 finalCol = mix(baseCol, uInkColor, line);
@@ -124,8 +126,10 @@ export class SketchRenderer {
 
         this.colorTarget = this._createTarget(true);
         this.normalTarget = this._createTarget(false);
+        this.guideTarget = this._createTarget(false);
 
         this.normalMaterial = new THREE.MeshNormalMaterial();
+        this.whiteDepthMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
         this.quadScene = new THREE.Scene();
         this.quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
@@ -133,6 +137,7 @@ export class SketchRenderer {
             tColor: { value: this.colorTarget.texture },
             tNormal: { value: this.normalTarget.texture },
             tDepth: { value: this.colorTarget.depthTexture },
+            tGuides: { value: this.guideTarget.texture },
             uResolution: { value: new THREE.Vector2(800, 600) },
             uNear: { value: 0.05 },
             uFar: { value: 100.0 },
@@ -142,6 +147,7 @@ export class SketchRenderer {
             uHatchDensity: { value: this.settings.hatchDensity },
             uPaperColor: { value: new THREE.Color(0xffffff) },
             uInkColor: { value: new THREE.Color(0x181b22) },
+            uShowGuides: { value: 1.0 },
             uMode: { value: 2 }
         };
 
@@ -150,10 +156,12 @@ export class SketchRenderer {
             fragmentShader: FRAGMENT_SHADER,
             uniforms: this.uniforms,
             depthTest: false,
-            depthWrite: false
+            depthWrite: false,
+            toneMapped: false
         });
 
         this.quadMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.quadMat);
+        this.quadMesh.frustumCulled = false;
         this.quadScene.add(this.quadMesh);
     }
 
@@ -175,27 +183,24 @@ export class SketchRenderer {
     setSize(width, height) {
         const w = Math.max(2, Math.floor(width));
         const h = Math.max(2, Math.floor(height));
-        this.colorTarget.setSize(w, h);
-        this.normalTarget.setSize(w, h);
+        if (this.colorTarget.width !== w || this.colorTarget.height !== h) {
+            this.colorTarget.setSize(w, h);
+            if (this.colorTarget.depthTexture) {
+                this.colorTarget.depthTexture.image.width = w;
+                this.colorTarget.depthTexture.image.height = h;
+                this.colorTarget.depthTexture.needsUpdate = true;
+            }
+            this.normalTarget.setSize(w, h);
+            this.guideTarget.setSize(w, h);
+        }
         this.uniforms.uResolution.value.set(w, h);
     }
 
-    render(scene, camera, options = {}) {
+    preparePasses(scene, camera, options = {}) {
         const mode = options.forceMode || this.settings.mode;
-        if (mode === '3d') {
-            if (options.guideObjects) {
-                for (const g of options.guideObjects) { if (g) g.visible = false; }
-            }
-            this.renderer.setRenderTarget(null);
-            this.renderer.render(scene, camera);
-            return;
-        }
-
-        const size = new THREE.Vector2();
-        this.renderer.getDrawingBufferSize(size);
-        if (this.colorTarget.width !== size.x || this.colorTarget.height !== size.y) {
-            this.setSize(size.x, size.y);
-        }
+        const targetW = options.targetWidth || this.colorTarget.width;
+        const targetH = options.targetHeight || this.colorTarget.height;
+        this.setSize(targetW, targetH);
 
         const paperHex = this.settings.paper === 'warm' ? 0xf4efe4 : 0xffffff;
         const inkMap = {
@@ -212,10 +217,13 @@ export class SketchRenderer {
         this.uniforms.uHatchDensity.value = this.settings.hatchDensity;
         this.uniforms.uNear.value = camera.near;
         this.uniforms.uFar.value = camera.far;
+        this.uniforms.uShowGuides.value = options.showGuides ? 1.0 : 0.0;
         this.uniforms.uMode.value = mode === 'sketch-line' ? 1 : 2;
 
-        // Save visibility and background state
         const prevBg = scene.background;
+        const prevScissorTest = this.renderer.getScissorTest();
+        this.renderer.setScissorTest(false);
+
         const hiddenRestore = [];
         const hideHelpers = options.hideHelpers ?? this.settings.hideHelpersInSketch;
 
@@ -231,28 +239,19 @@ export class SketchRenderer {
             hiddenRestore.push(options.floorMesh);
             options.floorMesh.visible = false;
         }
-
-        // Show construction guides only in colorTarget pass when enabled
-        if (options.guideObjects) {
-            for (const g of options.guideObjects) {
-                if (g) g.visible = !!options.showGuides;
-            }
-        }
-
-        // 1. Color + Depth pass
-        scene.background = new THREE.Color(0xffffff);
-        this.renderer.setRenderTarget(this.colorTarget);
-        this.renderer.clear();
-        this.renderer.render(scene, camera);
-
-        // Hide guide lines before normal override pass so MeshNormalMaterial only shades meshes
         if (options.guideObjects) {
             for (const g of options.guideObjects) {
                 if (g) g.visible = false;
             }
         }
 
-        // 2. Normal pass
+        // 1. Color + Depth pass (meshes only)
+        scene.background = new THREE.Color(0xffffff);
+        this.renderer.setRenderTarget(this.colorTarget);
+        this.renderer.clear();
+        this.renderer.render(scene, camera);
+
+        // 2. Normal pass (meshes only)
         scene.background = new THREE.Color(0x8080ff);
         const prevOverride = scene.overrideMaterial;
         scene.overrideMaterial = this.normalMaterial;
@@ -261,13 +260,81 @@ export class SketchRenderer {
         this.renderer.render(scene, camera);
         scene.overrideMaterial = prevOverride;
 
-        // Restore scene state
+        // 3. Depth-occluded construction guide lines pass (white background + white depth-writing meshes + dark guide lines)
+        if (options.showGuides && options.guideObjects && options.guideObjects.length) {
+            const meshRestores = [];
+            scene.traverse((obj) => {
+                if (obj.isMesh && obj.visible) {
+                    meshRestores.push({ obj, mat: obj.material });
+                    obj.material = this.whiteDepthMaterial;
+                }
+            });
+            for (const g of options.guideObjects) {
+                if (g) g.visible = true;
+            }
+            scene.background = new THREE.Color(0xffffff);
+            this.renderer.setRenderTarget(this.guideTarget);
+            this.renderer.clear();
+            this.renderer.render(scene, camera);
+
+            for (const item of meshRestores) item.obj.material = item.mat;
+            for (const g of options.guideObjects) {
+                if (g) g.visible = false;
+            }
+        }
+
         scene.background = prevBg;
         for (const obj of hiddenRestore) obj.visible = true;
+        this.renderer.setScissorTest(prevScissorTest);
+    }
 
-        // 3. Composite sketch shader to screen (or active target)
+    render(scene, camera, options = {}) {
+        const mode = options.forceMode || this.settings.mode;
+        if (mode === '3d') {
+            if (options.guideObjects) {
+                for (const g of options.guideObjects) {
+                    if (g) g.visible = false;
+                }
+            }
+            this.renderer.setRenderTarget(null);
+            this.renderer.render(scene, camera);
+            return;
+        }
+
+        const size = new THREE.Vector2();
+        this.renderer.getDrawingBufferSize(size);
+        this.preparePasses(scene, camera, {
+            ...options,
+            targetWidth: size.x,
+            targetHeight: size.y
+        });
+
         this.renderer.setRenderTarget(options.outputTarget || null);
         this.renderer.render(this.quadScene, this.quadCamera);
+    }
+
+    renderQuadToRect(scene, camera, cssX, cssYBottom, cssW, cssH, options = {}) {
+        const pr = this.renderer.getPixelRatio();
+        const prevAspect = camera.aspect;
+        camera.aspect = cssW / Math.max(1, cssH);
+        camera.updateProjectionMatrix();
+
+        this.preparePasses(scene, camera, {
+            ...options,
+            targetWidth: Math.max(4, Math.floor(cssW * pr)),
+            targetHeight: Math.max(4, Math.floor(cssH * pr)),
+            hideHelpers: true
+        });
+
+        camera.aspect = prevAspect;
+        camera.updateProjectionMatrix();
+
+        this.renderer.setRenderTarget(null);
+        this.renderer.setScissorTest(true);
+        this.renderer.setViewport(cssX, cssYBottom, cssW, cssH);
+        this.renderer.setScissor(cssX, cssYBottom, cssW, cssH);
+        this.renderer.render(this.quadScene, this.quadCamera);
+        this.renderer.setScissorTest(false);
     }
 
     exportFrameDataURL(scene, camera, options = {}) {
@@ -283,7 +350,6 @@ export class SketchRenderer {
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
 
-        this.setSize(w, h);
         this.render(scene, camera, {
             ...options,
             hideHelpers: true,
@@ -292,7 +358,6 @@ export class SketchRenderer {
 
         const dataUrl = this.renderer.domElement.toDataURL('image/png');
 
-        // Restore viewport
         this.renderer.setPixelRatio(prevPR);
         this.renderer.setSize(prevSize.x, prevSize.y, false);
         camera.aspect = prevAspect;
@@ -303,7 +368,9 @@ export class SketchRenderer {
     dispose() {
         this.colorTarget.dispose();
         this.normalTarget.dispose();
+        this.guideTarget.dispose();
         this.normalMaterial.dispose();
+        this.whiteDepthMaterial.dispose();
         this.quadMat.dispose();
         this.quadMesh.geometry.dispose();
     }
