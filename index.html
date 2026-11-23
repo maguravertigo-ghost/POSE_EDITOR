@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pose Reference Editor</title>
-<link rel="stylesheet" href="style.css">
+<title>POSE REF 2.0 — 3D Pose, Skeleton &amp; Sketch Reference Editor</title>
+<link rel="icon" href="/favicon.ico">
 </head>
 <body>
 <div id="app">
 
   <header>
-    <div class="logo">POSE REF</div>
+    <div class="logo">POSE REF <span>2.0</span></div>
+
     <nav class="menubar">
       <div class="menu" id="menuFile">
         <button class="menu-toggle">Файл ▾</button>
         <div class="menu-list">
-          <button data-action="new">🆕 Новый</button>
+          <button data-action="new">🆕 Новый персонаж</button>
           <hr>
           <button data-action="open-pose">📂 Открыть позу…</button>
           <button data-action="save-pose">💾 Сохранить позу</button>
@@ -23,126 +24,325 @@
           <button data-action="open-model">📂 Открыть модель…</button>
           <button data-action="save-model">💾 Сохранить модель</button>
           <hr>
-          <button data-action="bg">🖼 Фон…</button>
+          <button data-action="export-png">📷 Экспорт скетча (.png)</button>
+          <button data-action="export-glb">📦 Экспорт 3D модели (.glb)</button>
+          <hr>
+          <button data-action="bg">🖼 Фон-референс…</button>
           <button data-action="bg-clear">🚫 Очистить фон</button>
         </div>
       </div>
-      <div class="menu" id="menuPresets">
-        <button class="menu-toggle">Пресеты ▾</button>
+
+      <div class="menu" id="menuPoses">
+        <button class="menu-toggle">Позы ▾</button>
         <div class="menu-list" id="presetList"></div>
       </div>
-      <button id="btnForm" class="menu-toggle">✏️ Форма</button>
     </nav>
-    <div class="toggles">
-      <button id="btnJoints" class="toggle active">👁 Суставы</button>
-      <button id="btnGizmo"  class="toggle active">🎯 Gizmo</button>
-      <button id="btnGrid"   class="toggle active">📐 Сетка</button>
+
+    <div class="mode-tabs" id="editorModes">
+      <button class="mode-tab active" data-mode="pose">🎭 Поза и сцена</button>
+      <button class="mode-tab" data-mode="skeleton">🦴 Скелет и пропорции</button>
+      <button class="mode-tab" data-mode="shape">✏️ Форма и пресеты</button>
     </div>
+
+    <div class="render-tabs" id="renderModes" title="Режим отображения / шейдер скетча">
+      <button class="render-tab active" data-render="3d">3D</button>
+      <button class="render-tab" data-render="sketch-line">Контур</button>
+      <button class="render-tab" data-render="sketch-tone">Скетч+Тон</button>
+    </div>
+
+    <div class="toggles">
+      <button id="btnUndo" title="Отменить (Ctrl+Z)">↩</button>
+      <button id="btnExportPng" class="primary" title="Скачать текущий кадр в PNG">📷 PNG</button>
+      <button id="btnJoints" class="toggle active" title="Показать/скрыть суставы">👁</button>
+      <button id="btnGizmo" class="toggle active" title="Показать/скрыть гизмо">🎯</button>
+      <button id="btnGrid" class="toggle active" title="Показать/скрыть сетку">📐</button>
+    </div>
+
     <div id="fps">— FPS</div>
   </header>
 
-  <input type="file" id="filePose"    accept=".json,application/json" hidden>
-  <input type="file" id="fileModel"   accept=".json,application/json" hidden>
-  <input type="file" id="fileBg"      accept="image/*" hidden>
-  <input type="file" id="filePresets" accept=".json,.js" hidden>
+  <input type="file" id="filePose" accept=".json,application/json" hidden>
+  <input type="file" id="fileModel" accept=".json,application/json" hidden>
+  <input type="file" id="fileBg" accept="image/*" hidden>
 
   <div class="main">
     <aside id="sidebar">
-      <div class="sidebar-title">Части тела</div>
-      <div id="tree"></div>
+      <!-- PANEL: POSE & SCENE -->
+      <div class="sidebar-pane" data-pane-side="pose">
+        <div class="sidebar-section">
+          <div class="sidebar-title-row">
+            <span class="sidebar-title">Скелет персонажа</span>
+            <button id="btnMirrorPose" class="mini-btn" title="Отразить левую сторону позы на правую">L → R</button>
+          </div>
+          <div id="tree"></div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Элементы сцены</div>
+          <div class="props-add-grid">
+            <button class="mini-btn" data-add-prop="wall">+ Стена</button>
+            <button class="mini-btn" data-add-prop="corner">+ Угол</button>
+            <button class="mini-btn" data-add-prop="table">+ Стол</button>
+            <button class="mini-btn" data-add-prop="chair">+ Стул</button>
+            <button class="mini-btn" data-add-prop="block">+ Опора</button>
+          </div>
+          <div id="propsList" class="props-list"></div>
+        </div>
+      </div>
+
+      <!-- PANEL: SKELETON & PROPORTIONS -->
+      <div class="sidebar-pane hidden" data-pane-side="skeleton">
+        <div class="sidebar-section">
+          <div class="sidebar-title-row">
+            <span class="sidebar-title">Опорная схема</span>
+            <button id="btnResetSkeleton" class="mini-btn">Сброс</button>
+          </div>
+          <div class="skeleton-canvas-wrap">
+            <canvas id="skeleton2DCanvas"></canvas>
+          </div>
+          <div id="skeletonStats" class="stats-badge">Рост: —</div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Пропорции и резинки</div>
+          <div id="skeletonSliders" class="sliders-list"></div>
+        </div>
+      </div>
+
+      <!-- PANEL: SHAPE & BODY PRESETS -->
+      <div class="sidebar-pane hidden" data-pane-side="shape">
+        <div class="sidebar-section">
+          <div class="sidebar-title">Пресет фигуры</div>
+          <div class="preset-btns" id="bodyPresetBtns">
+            <button class="mini-btn active" data-body-preset="neutral">Манекен</button>
+            <button class="mini-btn" data-body-preset="male">Мужчина</button>
+            <button class="mini-btn" data-body-preset="female">Женщина</button>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Параметры тела</div>
+          <div class="slider-row">
+            <div class="slider-head"><span>Полнота (худой ↔ тучный)</span><span id="valWeight">0.00</span></div>
+            <input type="range" id="morphWeight" min="-1" max="1" step="0.05" value="0">
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><span>Атлетичность (хилый ↔ крепкий)</span><span id="valMuscle">0.10</span></div>
+            <input type="range" id="morphMuscle" min="-1" max="1" step="0.05" value="0.1">
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Детализация мешей</div>
+          <div class="preset-btns" id="subdivPresetBtns">
+            <button class="mini-btn" data-global-subdiv="0">Low-Poly</button>
+            <button class="mini-btn" data-global-subdiv="1">Средний</button>
+            <button class="mini-btn active" data-global-subdiv="2">Сглаженный</button>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Редактировать меш по точкам</div>
+          <p class="dim-note">Клик/рамка точек по сетке (L ↔ R зеркально).</p>
+          <div id="shapePartsList" class="shape-parts-grid"></div>
+        </div>
+      </div>
     </aside>
 
     <div id="stage">
       <canvas id="c"></canvas>
 
-      <div id="hud" class="hidden">
-        <div class="hud-title">—</div>
-        <div class="hud-tabs">
-          <button class="hud-tab active" data-tab="rot">Вращение</button>
-          <button class="hud-tab" data-tab="pos">Позиция</button>
-          <button class="hud-tab hidden" data-tab="fit">Подгонка</button>
+      <!-- Floating Selection HUD -->
+      <div id="hud" class="hud-card hidden">
+        <div class="hud-header">
+          <span class="hud-title">—</span>
+          <button id="hudResetJoint" class="mini-btn">Сброс</button>
         </div>
-        <div class="hud-panel" data-panel="rot">
+
+        <div id="hudJointControls">
+          <div class="hud-tool-row">
+            <button class="mini-btn active" id="gizmoRotateBtn" title="Вращение (E)">Вращение (E)</button>
+            <button class="mini-btn" id="gizmoMoveBtn" title="Позиция (W)">Позиция (W)</button>
+            <button class="mini-btn active" id="gizmoSpaceBtn" title="Переключить Локально/Мир">Локально</button>
+          </div>
           <div class="hud-row"><span class="hud-label">X</span><input type="range" data-rot="x" min="-3.14" max="3.14" step="0.01" value="0"><span class="hud-val" data-rot-val="x">0°</span></div>
           <div class="hud-row"><span class="hud-label">Y</span><input type="range" data-rot="y" min="-3.14" max="3.14" step="0.01" value="0"><span class="hud-val" data-rot-val="y">0°</span></div>
           <div class="hud-row"><span class="hud-label">Z</span><input type="range" data-rot="z" min="-3.14" max="3.14" step="0.01" value="0"><span class="hud-val" data-rot-val="z">0°</span></div>
-        </div>
-        <div class="hud-panel hidden" data-panel="pos">
-          <div class="hud-row"><span class="hud-label">X</span><input type="range" data-pos="x" min="-0.5" max="0.5" step="0.005" value="0"><span class="hud-val" data-pos-val="x">0.00</span></div>
-          <div class="hud-row"><span class="hud-label">Y</span><input type="range" data-pos="y" min="-0.5" max="0.5" step="0.005" value="0"><span class="hud-val" data-pos-val="y">0.00</span></div>
-          <div class="hud-row"><span class="hud-label">Z</span><input type="range" data-pos="z" min="-0.5" max="0.5" step="0.005" value="0"><span class="hud-val" data-pos-val="z">0.00</span></div>
-        </div>
-        <div class="hud-panel hidden" data-panel="fit">
-          <div class="hud-row"><span class="hud-label">X</span><input type="range" data-offset="x" min="-0.4" max="0.4" step="0.005" value="0"><span class="hud-val" data-offset-val="x">0.00</span></div>
-          <div class="hud-row"><span class="hud-label">Y</span><input type="range" data-offset="y" min="-0.4" max="0.4" step="0.005" value="0"><span class="hud-val" data-offset-val="y">0.00</span></div>
-          <div class="hud-row"><span class="hud-label">Z</span><input type="range" data-offset="z" min="-0.4" max="0.4" step="0.005" value="0"><span class="hud-val" data-offset-val="z">0.00</span></div>
-          <div class="hud-row">
-            <span class="hud-label">S</span>
-            <button class="hud-btn" data-zoom="-">−</button>
-            <input type="range" data-scale min="0.3" max="3" step="0.05" value="1">
-            <button class="hud-btn" data-zoom="+">+</button>
-            <span class="hud-val" data-scale-val>1.00</span>
+          <div class="hud-footer-actions">
+            <button id="hudOpenShape" class="mini-btn wide">✏️ Редактировать форму части</button>
           </div>
-          <div class="hud-row">
-            <button class="hud-btn wide" data-fit-reset>Сброс подгонки</button>
+        </div>
+
+        <div id="hudPropControls" class="hidden">
+          <div class="hud-tool-row">
+            <button class="mini-btn active" data-prop-mode="translate">Сдвиг (W)</button>
+            <button class="mini-btn" data-prop-mode="rotate">Поворот (E)</button>
+            <button class="mini-btn" data-prop-mode="scale">Размер (R)</button>
+          </div>
+          <div class="hud-footer-actions">
+            <button id="hudDeleteProp" class="mini-btn danger wide">🗑 Удалить объект</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Floating Camera, Light & Sketch Panel -->
+      <div id="sceneCard" class="hud-card bottom-right">
+        <div class="scene-card-tabs">
+          <button class="sc-tab active" data-sc="cam">🎥 Камера</button>
+          <button class="sc-tab" data-sc="light">💡 Свет</button>
+          <button class="sc-tab" data-sc="sketch">🖊 Скетч</button>
+        </div>
+
+        <div class="sc-panel" data-sc-panel="cam">
+          <div class="cam-presets">
+            <button class="mini-btn" data-cam="perspective">3D</button>
+            <button class="mini-btn" data-cam="front">Спереди</button>
+            <button class="mini-btn" data-cam="left">Слева</button>
+            <button class="mini-btn" data-cam="right">Справа</button>
+            <button class="mini-btn" data-cam="back">Сзади</button>
+            <button class="mini-btn" data-cam="top">Сверху</button>
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><span>Фокус (перспектива)</span><span id="valFocal">35 mm</span></div>
+            <input type="range" id="camFocal" min="20" max="135" step="1" value="35">
+          </div>
+        </div>
+
+        <div class="sc-panel hidden" data-sc-panel="light">
+          <div class="slider-row">
+            <div class="slider-head"><span>Азимут света</span><span id="valLightAz">40°</span></div>
+            <input type="range" id="lightAz" min="-180" max="180" step="2" value="40">
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><span>Высота света</span><span id="valLightEl">52°</span></div>
+            <input type="range" id="lightEl" min="5" max="88" step="1" value="52">
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><span>Яркость</span><span id="valLightInt">1.15</span></div>
+            <input type="range" id="lightInt" min="0.2" max="2.5" step="0.05" value="1.15">
+          </div>
+        </div>
+
+        <div class="sc-panel hidden" data-sc-panel="sketch">
+          <div class="slider-row">
+            <div class="slider-head"><span>Толщина линий</span><span id="valLineW">1.25</span></div>
+            <input type="range" id="sketchLineW" min="0.5" max="3.0" step="0.05" value="1.25">
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><span>Порог контуров</span><span id="valThresh">0.45</span></div>
+            <input type="range" id="sketchThresh" min="0.15" max="1.2" step="0.05" value="0.45">
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><span>Тон / штриховка</span><span id="valTone">0.75</span></div>
+            <input type="range" id="sketchTone" min="0" max="1" step="0.05" value="0.75">
+          </div>
+          <div class="sketch-opts-row">
+            <label><input type="checkbox" id="sketchHideHelpers" checked> Скрыть суставы</label>
+            <label><input type="checkbox" id="sketchGuides" checked> Линии построения</label>
+          </div>
+          <div class="sketch-opts-row">
+            <select id="sketchInk">
+              <option value="charcoal">Тушь: Графит</option>
+              <option value="violet">Тушь: Фиолетовая</option>
+              <option value="pink">Тушь: Розовая</option>
+              <option value="blue">Тушь: Синяя</option>
+            </select>
+            <select id="sketchPaper">
+              <option value="white">Белый лист</option>
+              <option value="warm">Бумага (тёплая)</option>
+            </select>
           </div>
         </div>
       </div>
 
       <div class="hint">
-        ЛКМ — выбрать · драг по оси — вращение · ПКМ — орбита · Shift+ПКМ / СКМ — пан · колесо — зум
+        ЛКМ — выбрать/крутить · ПКМ — панорама · Колесо — зум · W/E/R — сдвиг/вращение/размер · Ctrl+Z — отмена
       </div>
     </div>
   </div>
-
 </div>
 
-<div id="formModal" class="modal-overlay hidden">
+<!-- MULTIVIEW LOW-POLY MESH VERTEX EDITOR MODAL -->
+<div id="shapeModal" class="modal-overlay hidden">
   <div class="modal-window">
     <div class="modal-header">
-      <span>Редактор формы: <strong id="formPartName">—</strong></span>
-      <div class="form-scale">
-        <label>
-          Масштаб:
-          <input type="range" id="formScale" min="0.3" max="3" step="0.05" value="1">
-          <span id="formScaleVal">1.00</span>
+      <span>Редактор меша: <strong id="shapePartName">—</strong></span>
+      <div class="shape-toolbar">
+        <label>Сглаживание:
+          <select id="shapeSubdiv">
+            <option value="0">0 (Low-Poly)</option>
+            <option value="1">1 (Mid)</option>
+            <option value="2" selected>2 (Smooth)</option>
+          </select>
+        </label>
+        <label>Примитив:
+          <select id="shapePrimitiveType">
+            <option value="box">Куб (сетка)</option>
+            <option value="cylinder">Цилиндр</option>
+            <option value="sphere">Сфера</option>
+          </select>
+        </label>
+        <button id="shapeApplyPrimitive" class="mini-btn">Создать</button>
+        <label class="chk"><input type="checkbox" id="shapeSymX" checked> Симм. X</label>
+        <label class="chk"><input type="checkbox" id="shapeSymZ"> Симм. Z</label>
+        <label class="chk"><input type="checkbox" id="shapeSnapGrid"> Сетка</label>
+        <label class="chk"><input type="checkbox" id="shapeSoftFalloff"> Мягко</label>
+        <label class="scale-ctl">Масштаб:
+          <input type="range" id="shapeScale" min="0.4" max="2.2" step="0.05" value="1">
+          <span id="shapeScaleVal">1.00</span>
         </label>
       </div>
-      <button id="formClose" class="modal-close">×</button>
+      <button id="shapeClose" class="modal-close">×</button>
     </div>
+
     <div class="form-views">
-      <div class="form-view" data-view="front">
-        <div class="view-label">Спереди (X·Y)</div>
-        <label class="view-sym"><input type="checkbox" class="sym-toggle" data-view="front" checked> Симметрия</label>
-        <canvas data-canvas="front"></canvas>
+      <div class="form-view">
+        <div class="view-bar">
+          <button class="pane-btn active" data-pane="paneA" data-pane-mode="front">Спереди</button>
+          <button class="pane-btn" data-pane="paneA" data-pane-mode="back">Сзади</button>
+        </div>
+        <canvas id="shapeCanvasA"></canvas>
       </div>
-      <div class="form-view" data-view="side">
-        <div class="view-label">Сбоку (Z·Y)</div>
-        <label class="view-sym"><input type="checkbox" class="sym-toggle" data-view="side"> Симметрия</label>
-        <canvas data-canvas="side"></canvas>
+
+      <div class="form-view">
+        <div class="view-bar">
+          <button class="pane-btn active" data-pane="paneB" data-pane-mode="left">Слева</button>
+          <button class="pane-btn" data-pane="paneB" data-pane-mode="right">Справа</button>
+        </div>
+        <canvas id="shapeCanvasB"></canvas>
       </div>
-      <div class="form-view" data-view="top">
-        <div class="view-label">Сверху (X·Z)</div>
-        <canvas data-canvas="top"></canvas>
+
+      <div class="form-view">
+        <div class="view-bar">
+          <button class="pane-btn active" data-pane="paneC" data-pane-mode="top">Сверху</button>
+          <button class="pane-btn" data-pane="paneC" data-pane-mode="bottom">Снизу</button>
+        </div>
+        <canvas id="shapeCanvasC"></canvas>
       </div>
-      <div class="form-view" data-view="free">
-        <div class="view-label">3D (орбита / зум / пан)</div>
-        <canvas data-canvas="free"></canvas>
+
+      <div class="form-view">
+        <div class="view-bar">
+          <span class="view-tag">Свободная 3D-камера</span>
+        </div>
+        <canvas id="shapeCanvas3D"></canvas>
       </div>
     </div>
+
     <div class="modal-footer">
       <div class="form-hint">
-        Кривая: тяни точку · двойной клик — добавить · ПКМ — удалить.<br>
-        Жёлтая линия — позиция сустава внутри формы.
+        Клик / рамка ЛКМ — выделить точки · Shift+ЛКМ — добавить · Тяните выделенные точки по сетке.
       </div>
       <div class="modal-actions">
-        <button id="formCancel">Отмена</button>
-        <button id="formApply" class="primary">Применить</button>
+        <button id="shapeClearSel">Снять выделение</button>
+        <button id="shapeResetPart">Анатомия</button>
+        <button id="shapeCancel">Отмена</button>
+        <button id="shapeApply" class="primary">Применить к модели</button>
       </div>
     </div>
   </div>
 </div>
 
+<!-- SERVER BROWSER MODAL -->
 <div id="browserModal" class="modal-overlay hidden">
   <div class="modal-window small">
     <div class="modal-header">
@@ -159,6 +359,7 @@
   </div>
 </div>
 
+<!-- MESSAGE / PROMPT MODAL -->
 <div id="msgModal" class="modal-overlay hidden">
   <div class="modal-window msg-window">
     <div class="modal-header">
@@ -178,9 +379,6 @@
   </div>
 </div>
 
-<script src="three.min.js"></script>
-<script src="poses.js"></script>
-<script src="shapeEditor.js"></script>
-<script src="app.js"></script>
+<script type="module" src="/src/main.js"></script>
 </body>
 </html>
