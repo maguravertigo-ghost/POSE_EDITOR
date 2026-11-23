@@ -198,6 +198,19 @@
           <div class="hud-row"><span class="hud-label">X</span><input type="range" data-rot="x" min="-3.14" max="3.14" step="0.01" value="0"><span class="hud-val" data-rot-val="x">0°</span></div>
           <div class="hud-row"><span class="hud-label">Y</span><input type="range" data-rot="y" min="-3.14" max="3.14" step="0.01" value="0"><span class="hud-val" data-rot-val="y">0°</span></div>
           <div class="hud-row"><span class="hud-label">Z</span><input type="range" data-rot="z" min="-3.14" max="3.14" step="0.01" value="0"><span class="hud-val" data-rot-val="z">0°</span></div>
+          <div id="hudHandControls" class="hidden" style="margin-top:8px; padding-top:8px; border-top:1px solid #262e3e;">
+            <div class="slider-row">
+              <div class="slider-head"><span>Сжатие пальцев</span><span id="valHandCurl">22%</span></div>
+              <input type="range" id="handCurlSlider" min="0" max="1" step="0.02" value="0.22">
+            </div>
+            <div class="hud-tool-row">
+              <button class="mini-btn" data-hand-preset="open">Открыта</button>
+              <button class="mini-btn" data-hand-preset="relaxed">Мягко</button>
+              <button class="mini-btn" data-hand-preset="grip">Хват</button>
+              <button class="mini-btn" data-hand-preset="fist">Кулак</button>
+              <button class="mini-btn" data-hand-preset="point">Жест</button>
+            </div>
+          </div>
           <div class="hud-footer-actions">
             <button id="hudOpenShape" class="mini-btn wide"><span class="material-icons sm">edit</span> Редактировать форму части</button>
           </div>

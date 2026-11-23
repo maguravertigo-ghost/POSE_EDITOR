@@ -130,15 +130,18 @@ export class CharacterRig {
             this._addMesh(hand, this.materials.skin);
 
             const fingerSpecs = [
-                { name: `Большой ${side}`, len: 0.052, r: 0.0085, isThumb: true },
-                { name: `Указательный ${side}`, len: 0.068, r: 0.0072, zRatio: 0.28 },
-                { name: `Средний ${side}`, len: 0.075, r: 0.0075, zRatio: 0.10 },
-                { name: `Безымянный ${side}`, len: 0.070, r: 0.0071, zRatio: -0.09 },
-                { name: `Мизинец ${side}`, len: 0.056, r: 0.0064, zRatio: -0.26 }
+                { name: `Большой ${side}`, len1: 0.030, len2: 0.025, r: 0.0085, isThumb: true },
+                { name: `Указательный ${side}`, len1: 0.038, len2: 0.032, r: 0.0072, zRatio: 0.28 },
+                { name: `Средний ${side}`, len1: 0.042, len2: 0.035, r: 0.0075, zRatio: 0.10 },
+                { name: `Безымянный ${side}`, len1: 0.039, len2: 0.033, r: 0.0071, zRatio: -0.09 },
+                { name: `Мизинец ${side}`, len1: 0.031, len2: 0.026, r: 0.0064, zRatio: -0.26 }
             ];
             for (const fs of fingerSpecs) {
-                const fj = this._makeJoint(hand, fs.name, { isFinger: true, fingerInfo: fs });
-                this._addMesh(fj, this.materials.skin);
+                const fj1 = this._makeJoint(hand, fs.name, { isFinger: true, fingerInfo: { ...fs, seg: 1, len: fs.len1 } });
+                this._addMesh(fj1, this.materials.skin);
+
+                const fj2 = this._makeJoint(fj1, `${fs.name} 2`, { isFinger: true, fingerInfo: { ...fs, seg: 2, len: fs.len2, r: fs.r * 0.85 } });
+                this._addMesh(fj2, this.materials.skin);
             }
         };
 
@@ -231,20 +234,31 @@ export class CharacterRig {
             const handScale = o.handLen / 0.095;
             const palmDepth = 0.032 * handScale;
             const thumb = j[`Большой ${side}`];
+            const thumb2 = j[`Большой ${side} 2`];
             if (thumb) {
-                thumb.position.set(-sign * 0.006 * handScale, -o.handLen * 0.34, palmDepth * 0.92);
+                thumb.position.set(-sign * 0.008 * handScale, -o.handLen * 0.34, palmDepth * 0.96);
                 if (thumb.rotation.x === 0 && thumb.rotation.z === 0) {
-                    thumb.rotation.set(-0.42, 0, 0);
+                    thumb.rotation.set(-0.46, 0, -sign * 0.22);
                 }
             }
+            if (thumb2 && thumb) {
+                thumb2.position.set(0, -thumb.userData.fingerInfo.len1 * handScale, 0);
+                if (thumb2.rotation.z === 0) thumb2.rotation.set(0, 0, -sign * 0.32);
+            }
+
             const spread = [0.10, 0.03, -0.04, -0.11];
             const fNames = ['Указательный', 'Средний', 'Безымянный', 'Мизинец'];
             fNames.forEach((fName, idx) => {
-                const fj = j[`${fName} ${side}`];
-                if (fj && fj.userData.fingerInfo) {
-                    fj.position.set(0, -o.handLen * 0.96, fj.userData.fingerInfo.zRatio * o.handLen);
-                    if (fj.rotation.x === 0 && fj.rotation.y === 0 && fj.rotation.z === 0) {
-                        fj.rotation.x = spread[idx];
+                const fj1 = j[`${fName} ${side}`];
+                const fj2 = j[`${fName} ${side} 2`];
+                if (fj1 && fj1.userData.fingerInfo) {
+                    fj1.position.set(0, -o.handLen * 0.96, fj1.userData.fingerInfo.zRatio * o.handLen);
+                    if (fj1.rotation.x === 0 && fj1.rotation.y === 0 && fj1.rotation.z === 0) {
+                        fj1.rotation.set(spread[idx], 0, -sign * 0.16);
+                    }
+                    if (fj2) {
+                        fj2.position.set(0, -fj1.userData.fingerInfo.len1 * handScale, 0);
+                        if (fj2.rotation.z === 0) fj2.rotation.set(0, 0, -sign * 0.28);
                     }
                 }
             });
@@ -287,11 +301,11 @@ export class CharacterRig {
             this.guideLines.push(line);
         };
 
-        // Head crosshair: vertical centerline on front + horizontal brow/eye ellipse
+        // Loomis Head construction: vertical centerline, brow line, nose-base line, left/right temporal side ovals + ear crosshairs
         if (name === 'Голова') {
-            const rx = size.x * 0.51;
+            const rx = size.x * 0.505;
             const ry = size.y * 0.49;
-            const rz = size.z * 0.52;
+            const rz = size.z * 0.515;
             const vPts = [];
             for (let i = 0; i <= 28; i++) {
                 const ang = -Math.PI * 0.48 + (i / 28) * Math.PI * 0.96;
@@ -299,36 +313,94 @@ export class CharacterRig {
             }
             addLoop(vPts);
 
+            const eyeY = box.min.y + size.y * 0.48;
             const hPts = [];
-            const eyeY = box.min.y + size.y * 0.46;
             for (let i = 0; i <= 32; i++) {
                 const ang = (i / 32) * Math.PI * 2;
-                hPts.push(new THREE.Vector3(Math.cos(ang) * rx, eyeY, center.z + Math.sin(ang) * rz * 0.96));
+                hPts.push(new THREE.Vector3(Math.cos(ang) * rx, eyeY, center.z + Math.sin(ang) * rz * 0.95));
             }
             addLoop(hPts);
-        } else if (name === 'Грудь' || name === 'Живот' || name === 'Таз') {
-            // Front centerline + horizontal cross-section ring
-            const fPts = [
-                new THREE.Vector3(0, box.min.y + 0.01, box.max.z * 0.96),
-                new THREE.Vector3(0, center.y, box.max.z * 1.01),
-                new THREE.Vector3(0, box.max.y - 0.01, box.max.z * 0.95)
-            ];
-            addLoop(fPts);
 
-            const ringY = name === 'Грудь' ? box.min.y + size.y * 0.56 : center.y;
+            // Nose-base / cheekbone line (front arc)
+            const noseY = box.min.y + size.y * 0.30;
+            const nPts = [];
+            for (let i = 0; i <= 16; i++) {
+                const ang = Math.PI * 0.12 + (i / 16) * Math.PI * 0.76;
+                nPts.push(new THREE.Vector3(Math.cos(ang) * rx * 0.88, noseY, center.z + Math.sin(ang) * rz * 0.94));
+            }
+            addLoop(nPts);
+
+            // Loomis temporal oval planes (left + right sides of head)
+            const earY = box.min.y + size.y * 0.52;
+            const earZ = center.z - size.z * 0.04;
+            const ovalR = size.y * 0.25;
+            for (const sgn of [1, -1]) {
+                const sideX = sgn * rx * 0.92;
+                const earOval = [];
+                for (let i = 0; i <= 24; i++) {
+                    const ang = (i / 24) * Math.PI * 2;
+                    earOval.push(new THREE.Vector3(sideX, earY + Math.sin(ang) * ovalR, earZ + Math.cos(ang) * ovalR * 0.92));
+                }
+                addLoop(earOval);
+                addLoop([new THREE.Vector3(sideX, earY - ovalR, earZ), new THREE.Vector3(sideX, earY + ovalR, earZ)]);
+            }
+        } else if (name === 'Грудь') {
+            // Sternum centerline + pectoral guide + costal ribcage arch
+            addLoop([
+                new THREE.Vector3(0, box.min.y + 0.01, box.max.z * 0.92),
+                new THREE.Vector3(0, center.y, box.max.z * 1.02),
+                new THREE.Vector3(0, box.max.y - 0.01, box.max.z * 0.85)
+            ]);
+            const pecY = box.min.y + size.y * 0.55;
             const ringPts = [];
             for (let i = 0; i <= 28; i++) {
                 const ang = (i / 28) * Math.PI * 2;
-                ringPts.push(new THREE.Vector3(
-                    Math.cos(ang) * size.x * 0.46,
-                    ringY,
-                    center.z + Math.sin(ang) * size.z * 0.48
-                ));
+                ringPts.push(new THREE.Vector3(Math.cos(ang) * size.x * 0.46, pecY, center.z + Math.sin(ang) * size.z * 0.49));
             }
             addLoop(ringPts);
+
+            // Costal arch inverted U on front of ribcage
+            const archPts = [];
+            for (let i = 0; i <= 16; i++) {
+                const u = (i / 16) * 2 - 1; // -1..1
+                const ay = box.min.y + size.y * (0.08 + (1 - u * u) * 0.30);
+                archPts.push(new THREE.Vector3(u * size.x * 0.36, ay, box.max.z * (0.94 - Math.abs(u) * 0.14)));
+            }
+            addLoop(archPts);
+        } else if (name === 'Живот') {
+            addLoop([
+                new THREE.Vector3(0, box.min.y + 0.01, box.max.z * 0.96),
+                new THREE.Vector3(0, center.y, box.max.z * 1.02),
+                new THREE.Vector3(0, box.max.y - 0.01, box.max.z * 0.96)
+            ]);
+            const waistPts = [];
+            for (let i = 0; i <= 24; i++) {
+                const ang = (i / 24) * Math.PI * 2;
+                waistPts.push(new THREE.Vector3(Math.cos(ang) * size.x * 0.45, center.y, center.z + Math.sin(ang) * size.z * 0.48));
+            }
+            addLoop(waistPts);
+        } else if (name === 'Таз') {
+            // V-cut briefs/pelvis guide + iliac belt ring + centerline
+            addLoop([
+                new THREE.Vector3(0, box.min.y + 0.01, box.max.z * 0.86),
+                new THREE.Vector3(0, center.y, box.max.z * 1.01),
+                new THREE.Vector3(0, box.max.y - 0.01, box.max.z * 0.95)
+            ]);
+            const beltPts = [];
+            const beltY = box.min.y + size.y * 0.68;
+            for (let i = 0; i <= 28; i++) {
+                const ang = (i / 28) * Math.PI * 2;
+                beltPts.push(new THREE.Vector3(Math.cos(ang) * size.x * 0.47, beltY, center.z + Math.sin(ang) * size.z * 0.48));
+            }
+            addLoop(beltPts);
+            // V-cut front curve
+            addLoop([
+                new THREE.Vector3(-size.x * 0.40, box.min.y + size.y * 0.68, box.max.z * 0.65),
+                new THREE.Vector3(0, box.min.y + size.y * 0.08, box.max.z * 0.86),
+                new THREE.Vector3(size.x * 0.40, box.min.y + size.y * 0.68, box.max.z * 0.65)
+            ]);
         } else if (name.startsWith('Плечо') || name.startsWith('Локоть') || name.startsWith('Бедро') || name.startsWith('Колено')) {
-            // Joint cap circle + subtle front axis line
-            const r = Math.min(size.x, size.z) * 0.44;
+            const r = Math.min(size.x, size.z) * 0.45;
             const capPts = [];
             for (let i = 0; i <= 24; i++) {
                 const ang = (i / 24) * Math.PI * 2;
@@ -336,8 +408,15 @@ export class CharacterRig {
             }
             addLoop(capPts);
             addLoop([
-                new THREE.Vector3(0, box.max.y - 0.01, box.max.z * 0.85),
-                new THREE.Vector3(0, box.min.y + 0.01, box.max.z * 0.82)
+                new THREE.Vector3(0, box.max.y - 0.01, box.max.z * 0.86),
+                new THREE.Vector3(0, box.min.y + 0.01, box.max.z * 0.84)
+            ]);
+        } else if (name.startsWith('Носок')) {
+            // Big-toe notch hint (like foot sketch references)
+            const sgn = name.endsWith('L') ? -1 : 1; // inner big-toe side
+            addLoop([
+                new THREE.Vector3(sgn * size.x * 0.16, center.y, box.min.z + 0.005),
+                new THREE.Vector3(sgn * size.x * 0.16, center.y, box.max.z * 0.96)
             ]);
         }
     }
@@ -466,6 +545,38 @@ export class CharacterRig {
             const jr = this.jointByName[rName];
             if (!jl || !jr) continue;
             jr.rotation.set(jl.rotation.x, -jl.rotation.y, -jl.rotation.z);
+        }
+    }
+
+    setHandCurl(side, curl01) {
+        const sign = side === 'L' ? 1 : -1;
+        const c = Math.max(0, Math.min(1, curl01));
+        const spread = [0.09 * (1 - c * 0.7), 0.02 * (1 - c * 0.7), -0.04 * (1 - c * 0.7), -0.10 * (1 - c * 0.7)];
+        const fNames = ['Указательный', 'Средний', 'Безымянный', 'Мизинец'];
+        fNames.forEach((fName, idx) => {
+            const j1 = this.jointByName[`${fName} ${side}`];
+            const j2 = this.jointByName[`${fName} ${side} 2`];
+            if (j1) j1.rotation.set(spread[idx], 0, -sign * (0.04 + c * 1.25));
+            if (j2) j2.rotation.set(0, 0, -sign * (0.05 + c * 1.45));
+        });
+        const t1 = this.jointByName[`Большой ${side}`];
+        const t2 = this.jointByName[`Большой ${side} 2`];
+        if (t1) t1.rotation.set(-0.48 + c * 0.28, 0, -sign * (0.08 + c * 0.65));
+        if (t2) t2.rotation.set(0, 0, -sign * (0.08 + c * 0.85));
+    }
+
+    setHandPreset(side, preset) {
+        const sign = side === 'L' ? 1 : -1;
+        if (preset === 'open') { this.setHandCurl(side, 0.0); return; }
+        if (preset === 'relaxed') { this.setHandCurl(side, 0.22); return; }
+        if (preset === 'grip') { this.setHandCurl(side, 0.58); return; }
+        if (preset === 'fist') { this.setHandCurl(side, 0.96); return; }
+        if (preset === 'point') {
+            this.setHandCurl(side, 0.92);
+            const i1 = this.jointByName[`Указательный ${side}`];
+            const i2 = this.jointByName[`Указательный ${side} 2`];
+            if (i1) i1.rotation.set(0.04, 0, -sign * 0.04);
+            if (i2) i2.rotation.set(0, 0, -sign * 0.05);
         }
     }
 

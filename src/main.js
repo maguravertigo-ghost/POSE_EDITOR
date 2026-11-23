@@ -328,7 +328,34 @@ function updateHUD() {
 
     const hasCage = !j.userData.isFinger;
     document.getElementById('hudOpenShape').style.display = hasCage ? '' : 'none';
+
+    const isHand = j.userData.baseLabel === 'Кисть L' || j.userData.baseLabel === 'Кисть R';
+    document.getElementById('hudHandControls').classList.toggle('hidden', !isHand);
 }
+
+const handCurlSlider = document.getElementById('handCurlSlider');
+const valHandCurl = document.getElementById('valHandCurl');
+handCurlSlider.addEventListener('pointerdown', () => pushUndo());
+handCurlSlider.addEventListener('input', () => {
+    if (!appState.selectedJoint) return;
+    const lbl = appState.selectedJoint.userData.baseLabel;
+    if (lbl !== 'Кисть L' && lbl !== 'Кисть R') return;
+    const side = lbl.endsWith('L') ? 'L' : 'R';
+    const v = parseFloat(handCurlSlider.value);
+    valHandCurl.textContent = `${Math.round(v * 100)}%`;
+    character.setHandCurl(side, v);
+});
+
+document.querySelectorAll('[data-hand-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        if (!appState.selectedJoint) return;
+        const lbl = appState.selectedJoint.userData.baseLabel;
+        if (lbl !== 'Кисть L' && lbl !== 'Кисть R') return;
+        pushUndo();
+        const side = lbl.endsWith('L') ? 'L' : 'R';
+        character.setHandPreset(side, btn.dataset.handPreset);
+    });
+});
 
 rotInputs.forEach((inp, i) => {
     inp.addEventListener('pointerdown', () => pushUndo());
