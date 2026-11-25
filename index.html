@@ -32,6 +32,7 @@
           <hr>
           <button data-action="export-png"><span class="material-icons sm">image</span> Экспорт скетча (.png)</button>
           <button data-action="export-glb"><span class="material-icons sm">view_in_ar</span> Экспорт 3D модели (.glb)</button>
+          <button data-action="export-game-json"><span class="material-icons sm">code</span> Экспорт для игры (.json)</button>
           <hr>
           <button data-action="bg"><span class="material-icons sm">wallpaper</span> Фон-референс…</button>
           <button data-action="bg-clear"><span class="material-icons sm">hide_image</span> Очистить фон</button>
@@ -60,6 +61,18 @@
     </div>
 
     <div class="toggles">
+      <button id="btnQuadView" class="toggle" title="Режим 4 проекций (Спереди / Сбоку / Сверху / 3D)">
+        <span class="material-icons sm">grid_view</span> 4 окна
+      </button>
+      <button id="btnIK" class="toggle" title="Живая 2-костная IK рук и ног">
+        <span class="material-icons sm">hub</span> IK
+      </button>
+      <button id="btnPinFeet" class="toggle" title="Приклеить стопы к полу (Pin Feet)">
+        <span class="material-icons sm">push_pin</span> Стопы
+      </button>
+      <button id="btnAnimDock" class="toggle" title="Таймлайн анимации с кривыми">
+        <span class="material-icons sm">movie</span> Аним
+      </button>
       <button id="btnPip" class="toggle active" title="Окно предпросмотра финального скетча">
         <span class="material-icons sm">picture_in_picture_alt</span> Финал
       </button>
@@ -78,6 +91,8 @@
   <input type="file" id="filePose" accept=".json,application/json" hidden>
   <input type="file" id="fileModel" accept=".json,application/json" hidden>
   <input type="file" id="fileBg" accept="image/*" hidden>
+  <input type="file" id="fileRefGlbMale" accept=".glb,.gltf" hidden>
+  <input type="file" id="fileRefGlbFemale" accept=".glb,.gltf" hidden>
 
   <div class="main">
     <aside id="sidebar">
@@ -123,16 +138,88 @@
           <div class="sidebar-title">Пропорции и резинки</div>
           <div id="skeletonSliders" class="sliders-list"></div>
         </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Метрика и подгонка скелета</div>
+          <div class="sketch-opts-row" style="margin-bottom:6px;">
+            <label><input type="checkbox" id="chkRuler" checked> Ростомер (1u=1м)</label>
+            <label><input type="checkbox" id="chkFitSkeleton"> Подгонка по виду</label>
+          </div>
+          <div class="sketch-opts-row">
+            <label><input type="checkbox" id="chkFitSym" checked> Симметрия L↔R</label>
+            <button id="btnResetFit" class="mini-btn">Сброс сдвигов</button>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title-row">
+            <span class="sidebar-title">Эталоны .GLB (Ghost)</span>
+            <label class="chk-mini"><input type="checkbox" id="chkRefSideBySide"> Рядом</label>
+          </div>
+
+          <div class="ref-slot-card">
+            <div class="ref-slot-top">
+              <strong>Мужская база .glb</strong>
+              <button class="mini-btn" id="btnLoadRefMale"><span class="material-icons sm">upload_file</span> .GLB</button>
+            </div>
+            <div class="ref-slot-row">
+              <label>Рост (м): <input type="number" id="refHeightMale" value="1.80" step="0.01" min="0.5" max="2.5"></label>
+              <button class="mini-btn" id="btnAlignRefMale" title="Выровнять по стопам (Y=0) и росту">Выровнять Y=0</button>
+            </div>
+            <div class="ref-slot-row">
+              <select id="refModeMale">
+                <option value="xray">X-Ray</option>
+                <option value="wireframe">Каркас</option>
+                <option value="solid">Сплошной</option>
+              </select>
+              <label><input type="checkbox" id="refVisMale" checked> Показать</label>
+              <button class="mini-btn" id="btnClearRefMale">✕</button>
+            </div>
+          </div>
+
+          <div class="ref-slot-card">
+            <div class="ref-slot-top">
+              <strong>Женская база .glb</strong>
+              <button class="mini-btn" id="btnLoadRefFemale"><span class="material-icons sm">upload_file</span> .GLB</button>
+            </div>
+            <div class="ref-slot-row">
+              <label>Рост (м): <input type="number" id="refHeightFemale" value="1.68" step="0.01" min="0.5" max="2.5"></label>
+              <button class="mini-btn" id="btnAlignRefFemale" title="Выровнять по стопам (Y=0) и росту">Выровнять Y=0</button>
+            </div>
+            <div class="ref-slot-row">
+              <select id="refModeFemale">
+                <option value="xray">X-Ray</option>
+                <option value="wireframe">Каркас</option>
+                <option value="solid">Сплошной</option>
+              </select>
+              <label><input type="checkbox" id="refVisFemale" checked> Показать</label>
+              <button class="mini-btn" id="btnClearRefFemale">✕</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- PANEL: SHAPE & BODY PRESETS -->
       <div class="sidebar-pane hidden" data-pane-side="shape">
+        <div class="sidebar-section">
+          <div class="sidebar-title">Игровые персонажи (экипировка)</div>
+          <div class="preset-btns" id="charPresetBtns">
+            <button class="mini-btn active" data-char-preset="mannequin">Манекен</button>
+            <button class="mini-btn" data-char-preset="king">Король</button>
+            <button class="mini-btn" data-char-preset="mage">Маг</button>
+            <button class="mini-btn" data-char-preset="zombie">Зомби</button>
+          </div>
+        </div>
+
         <div class="sidebar-section">
           <div class="sidebar-title">Пресет фигуры</div>
           <div class="preset-btns" id="bodyPresetBtns">
             <button class="mini-btn active" data-body-preset="neutral">Манекен</button>
             <button class="mini-btn" data-body-preset="male">Мужчина</button>
             <button class="mini-btn" data-body-preset="female">Женщина</button>
+          </div>
+          <div class="sketch-opts-row" style="margin-top:8px;">
+            <label><input type="checkbox" id="chkBallJoints" checked> Шарниры-сферы на сгибах</label>
           </div>
         </div>
 
@@ -158,6 +245,25 @@
         </div>
 
         <div class="sidebar-section">
+          <div class="sidebar-title">Одежда, плащ и экипировка</div>
+          <div class="att-builder">
+            <select id="attJointSelect"></select>
+            <div class="att-builder-row">
+              <select id="attTypeSelect">
+                <option value="box">Куб / Короб</option>
+                <option value="cylinder">Цилиндр / Рукав</option>
+                <option value="sphere">Сфера / Шарнир</option>
+                <option value="cone">Конус (шляпа/роба)</option>
+                <option value="plate">Пластина (плащ/щит)</option>
+              </select>
+              <input type="color" id="attColorInput" value="#4f6d9a" title="Цвет материала">
+              <button id="btnAddAttachment" class="mini-btn primary">+ Добавить</button>
+            </div>
+          </div>
+          <div id="attachmentsList" class="props-list"></div>
+        </div>
+
+        <div class="sidebar-section">
           <div class="sidebar-title">Редактировать меш по точкам</div>
           <p class="dim-note">Клик/рамка точек по сетке (L ↔ R зеркально).</p>
           <div id="shapePartsList" class="shape-parts-grid"></div>
@@ -167,6 +273,16 @@
 
     <div id="stage">
       <canvas id="c"></canvas>
+
+      <!-- Quad View quadrant labels -->
+      <div id="quadLabels" class="hidden">
+        <div class="q-label tl">Спереди (XY)</div>
+        <div class="q-label tr">Сбоку (ZY)</div>
+        <div class="q-label bl">Сверху (XZ)</div>
+        <div class="q-label br">3D Перспектива</div>
+        <div class="q-cross-h"></div>
+        <div class="q-cross-v"></div>
+      </div>
 
       <!-- Live Final Sketch Shader Preview PiP -->
       <div id="sketchPip">
@@ -301,6 +417,36 @@
       <div class="hint">
         ЛКМ — выбрать/крутить · ПКМ — панорама · Колесо — зум · W/E/R — сдвиг/вращение/размер · Ctrl+Z — отмена
       </div>
+
+      <!-- Collapsible Animation Timeline Dock -->
+      <div id="animDock" class="anim-dock hidden">
+        <div class="anim-top">
+          <div class="anim-transport">
+            <button id="animPlayBtn" class="mini-btn primary" title="Play / Pause"><span class="material-icons sm">play_arrow</span></button>
+            <button id="animStopBtn" class="mini-btn" title="Стоп / В начало"><span class="material-icons sm">stop</span></button>
+            <select id="animClipSelect"></select>
+            <button id="animNewClip" class="mini-btn" title="Создать новый клип">+ Клип</button>
+            <select id="animSpeedSelect" title="Скорость">
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1.0x</option>
+              <option value="1.5">1.5x</option>
+            </select>
+            <span id="animTimeLabel" class="anim-time">0.00s / 2.20s</span>
+          </div>
+          <div class="anim-key-actions">
+            <button id="animAddKey" class="mini-btn" title="Записать текущую позу в ключ">+ Ключ</button>
+            <button id="animDelKey" class="mini-btn" title="Удалить выбранный ключ">Удалить</button>
+            <select id="animEasingSelect" title="Кривая перехода"></select>
+            <canvas id="animCurveCanvas" width="76" height="34" title="График кривой перехода"></canvas>
+            <button id="animSaveServer" class="mini-btn" title="Сохранить анимацию на сервер"><span class="material-icons sm">save</span></button>
+            <button id="animLoadServer" class="mini-btn" title="Открыть анимацию с сервера"><span class="material-icons sm">folder_open</span></button>
+          </div>
+        </div>
+        <div class="anim-track-wrap">
+          <div id="animKeyMarkers" class="anim-markers"></div>
+          <input type="range" id="animScrubber" min="0" max="1" step="0.005" value="0">
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -323,9 +469,12 @@
             <option value="box">Куб (сетка)</option>
             <option value="cylinder">Цилиндр</option>
             <option value="sphere">Сфера</option>
+            <option value="cone">Конус</option>
+            <option value="plate">Пластина</option>
           </select>
         </label>
         <button id="shapeApplyPrimitive" class="mini-btn">Создать</button>
+        <button id="shapeSelectRing" class="mini-btn" title="Выделить всё кольцо по уровню выбранной точки">Кольцо</button>
         <label class="chk"><input type="checkbox" id="shapeSymX" checked> Симм. X</label>
         <label class="chk"><input type="checkbox" id="shapeSymZ"> Симм. Z</label>
         <label class="chk"><input type="checkbox" id="shapeSnapGrid"> Сетка</label>

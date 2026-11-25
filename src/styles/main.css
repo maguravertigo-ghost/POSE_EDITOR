@@ -628,3 +628,190 @@ input[type="range"] {
     font: inherit;
 }
 .msg-input.hidden, .hidden { display: none !important; }
+
+/* ---------- Quad View Overlay ---------- */
+#quadLabels {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 8;
+}
+.q-cross-h {
+    position: absolute;
+    left: 0; right: 0; top: 50%;
+    height: 1px;
+    background: rgba(74, 158, 255, 0.35);
+}
+.q-cross-v {
+    position: absolute;
+    top: 0; bottom: 0; left: 50%;
+    width: 1px;
+    background: rgba(74, 158, 255, 0.35);
+}
+.q-label {
+    position: absolute;
+    padding: 3px 8px;
+    font: 600 10px/1.2 ui-monospace, monospace;
+    color: #93c5fd;
+    background: rgba(16, 20, 28, 0.78);
+    border: 1px solid #2b3447;
+    border-radius: 4px;
+}
+.q-label.tl { top: 8px; left: 8px; }
+.q-label.tr { top: 8px; left: calc(50% + 8px); }
+.q-label.bl { top: calc(50% + 8px); left: 8px; }
+.q-label.br { top: calc(50% + 8px); left: calc(50% + 8px); }
+
+/* ---------- Reference GLB Cards & Attachment Builder ---------- */
+.ref-slot-card {
+    background: #141821;
+    border: 1px solid #262e3e;
+    border-radius: 7px;
+    padding: 8px;
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.ref-slot-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #cfd6e6;
+}
+.ref-slot-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 11px;
+    color: #9ca5b7;
+}
+.ref-slot-row input[type="number"] {
+    width: 60px;
+    background: #0d1016;
+    border: 1px solid #2d3648;
+    border-radius: 4px;
+    color: #e6e9ef;
+    padding: 2px 5px;
+    font-size: 11px;
+}
+.ref-slot-row select, .att-builder select {
+    background: #0d1016;
+    border: 1px solid #2d3648;
+    border-radius: 4px;
+    color: #cfd6e6;
+    padding: 4px 6px;
+    font-size: 11px;
+}
+.chk-mini { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #9ca5b7; cursor: pointer; }
+
+.att-builder {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.att-builder-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+.att-builder-row select { flex: 1; min-width: 0; }
+.att-builder-row input[type="color"] {
+    width: 28px;
+    height: 24px;
+    border: 1px solid #2d3648;
+    border-radius: 4px;
+    background: #0d1016;
+    padding: 1px;
+    cursor: pointer;
+}
+
+/* ---------- Animation Timeline Dock ---------- */
+.anim-dock {
+    position: absolute;
+    left: 12px;
+    right: 290px;
+    bottom: 28px;
+    background: rgba(18, 22, 31, 0.94);
+    border: 1px solid #2b3344;
+    border-radius: 9px;
+    padding: 8px 12px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    z-index: 14;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.anim-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.anim-transport, .anim-key-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+.anim-dock select {
+    background: #0d1016;
+    border: 1px solid #2d3648;
+    border-radius: 4px;
+    color: #dfe4ef;
+    padding: 3px 6px;
+    font-size: 11px;
+}
+.anim-time {
+    font: 600 10px/1 ui-monospace, monospace;
+    color: #93c5fd;
+    min-width: 78px;
+}
+#animCurveCanvas {
+    border: 1px solid #2b3447;
+    border-radius: 4px;
+    background: #0f131d;
+}
+.anim-track-wrap {
+    position: relative;
+    height: 22px;
+    display: flex;
+    align-items: center;
+}
+#animScrubber {
+    width: 100%;
+    position: relative;
+    z-index: 2;
+}
+.anim-markers {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    top: 0;
+    height: 10px;
+    pointer-events: none;
+    z-index: 3;
+}
+.kf-marker {
+    position: absolute;
+    top: 1px;
+    width: 9px;
+    height: 9px;
+    margin-left: -4.5px;
+    transform: rotate(45deg);
+    background: #f59e0b;
+    border: 1px solid #181d27;
+    padding: 0;
+    pointer-events: auto;
+    cursor: pointer;
+}
+.kf-marker.active {
+    background: #4a9eff;
+    box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.35);
+}
+

@@ -3,12 +3,17 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 
 import { CharacterRig } from './core/character.js';
-import { BODY_PRESETS, DEFAULT_PROPORTIONS } from './core/rigSchema.js';
+import { BODY_PRESETS, DEFAULT_PROPORTIONS, MIRROR_PAIRS } from './core/rigSchema.js';
 import { BUILTIN_POSES } from './core/posesLibrary.js';
+import { CHARACTER_PRESETS } from './core/characterPresets.js';
+import { IKManager } from './core/ikSolver.js';
+import { AnimationEngine } from './core/animationEngine.js';
 import { SceneManager } from './viewport/sceneManager.js';
 import { PropsManager } from './viewport/propsManager.js';
+import { ReferenceGlbManager } from './viewport/referenceGlbManager.js';
 import { SkeletonEditor } from './editors/skeletonEditor.js';
 import { ShapeEditorModal } from './editors/shapeEditor.js';
+import { AnimationEditorUI } from './editors/animationEditor.js';
 
 const stage = document.getElementById('stage');
 const canvas = document.getElementById('c');
@@ -17,8 +22,12 @@ const fpsEl = document.getElementById('fps');
 const sceneMgr = new SceneManager(canvas, stage);
 const character = new CharacterRig(sceneMgr.scene);
 const propsMgr = new PropsManager(sceneMgr.scene);
+const refGlbMgr = new ReferenceGlbManager(sceneMgr.scene);
+const ikMgr = new IKManager(sceneMgr.scene, character);
+const animEngine = new AnimationEngine(character);
+const animUI = new AnimationEditorUI(animEngine, () => updateHUD());
 const skeletonEditor = new SkeletonEditor(sceneMgr.scene, character, () => syncSkeletonSliders());
-const shapeEditor = new ShapeEditorModal(character, () => {});
+const shapeEditor = new ShapeEditorModal(character, () => renderAttachmentsList());
 
 const appState = {
     mode: 'pose', // 'pose' | 'skeleton' | 'shape'
@@ -27,10 +36,13 @@ const appState = {
     showGrid: true,
     selectedJoint: null,
     selectedProp: null,
+    selectedIK: null,
     gizmoMode: 'rotate',
     gizmoSpace: 'local',
     undoStack: [],
     activePresetId: 'neutral',
+    fitSkeleton: false,
+    fitSym: true,
     serverAvailable: false
 };
 
@@ -106,7 +118,11 @@ function updateGizmoAttachment() {
         sceneMgr.attachTransform(null);
         return;
     }
-    if (appState.selectedProp) {
+    if (appState.selectedIK) {
+        sceneMgr.attachTransform(appState.selectedIK);
+        sceneMgr.transform.setMode('translate');
+        sceneMgr.transform.setSpace('world');
+    } else if (appState.selectedProp) {
         sceneMgr.attachTransform(appState.selectedProp);
         sceneMgr.transform.setMode(appState.gizmoMode);
         sceneMgr.transform.setSpace(appState.gizmoSpace);
@@ -121,12 +137,26 @@ function updateGizmoAttachment() {
     }
 }
 
+function selectIKHandle(handle) {
+    if (appState.selectedJoint) {
+        character.setJointSelectedStyle(appState.selectedJoint, false);
+        appState.selectedJoint = null;
+    }
+    appState.selectedProp = null;
+    appState.selectedIK = handle;
+    updateTreeSelection();
+    renderPropsList();
+    updateGizmoAttachment();
+    updateHUD();
+}
+
 function selectJoint(joint) {
     if (appState.selectedJoint) {
         character.setJointSelectedStyle(appState.selectedJoint, false);
     }
     appState.selectedJoint = joint;
     appState.selectedProp = null;
+    appState.selectedIK = null;
     if (joint) {
         character.setJointSelectedStyle(joint, true);
         if (!joint.userData.isRoot && appState.gizmoMode === 'translate') {
@@ -144,6 +174,7 @@ function selectProp(prop) {
         character.setJointSelectedStyle(appState.selectedJoint, false);
         appState.selectedJoint = null;
     }
+    appState.selectedIK = null;
     appState.selectedProp = prop;
     updateTreeSelection();
     renderPropsList();
@@ -151,26 +182,122 @@ function selectProp(prop) {
     updateHUD();
 }
 
-sceneMgr.onTransformChange = () => {
+sceneMgr.onTransformChange = (obj) => {
+    if (obj && obj.userData.isIKHandle) {
+        ikMgr.solveChain(obj.userData.chainKey);
+    } else if (ikMgr.pinFeet && appState.selectedJoint && appState.selectedJoint.userData.isRoot) {
+        ikMgr.solvePinnedFeet();
+    }
     updateHUD();
 };
 sceneMgr.onTransformEnd = () => {
-    // Undo snapshot captured on pointerdown before drag
+    if (ikMgr.enabled && !appState.selectedIK) {
+        ikMgr.syncHandlesFromRig();
+    }
 };
 
-/* ==================== RAYCAST PICKING ==================== */
+/* ==================== RAYCAST PICKING & QUAD/FIT INTERACTION ==================== */
 
 const raycaster = new THREE.Raycaster();
-const ndc = new THREE.Vector2();
 let pointerDownPos = null;
+let orthoPanState = null;
+let fitDragState = null;
+
+function applySkeletonFitOffset(jointName, dx, dy, dz) {
+    const prev = character.customJointOffsets[jointName] || [0, 0, 0];
+    character.customJointOffsets[jointName] = [prev[0] + dx, prev[1] + dy, prev[2] + dz];
+
+    if (appState.fitSym) {
+        for (const [lName, rName] of MIRROR_PAIRS) {
+            if (lName === jointName) {
+                const pr = character.customJointOffsets[rName] || [0, 0, 0];
+                character.customJointOffsets[rName] = [pr[0] - dx, pr[1] + dy, pr[2] + dz];
+            } else if (rName === jointName) {
+                const pl = character.customJointOffsets[lName] || [0, 0, 0];
+                character.customJointOffsets[lName] = [pl[0] - dx, pl[1] + dy, pl[2] + dz];
+            }
+        }
+    }
+    character.updateJointPositions(false);
+    skeletonEditor.rebuild3DGuides();
+}
+
+canvas.addEventListener('wheel', (e) => {
+    if (!sceneMgr.quadView) return;
+    const info = sceneMgr.getPointerInfo(e.clientX, e.clientY);
+    if (info.quadrant !== '3d') {
+        e.preventDefault();
+        sceneMgr.zoomOrtho(e.deltaY > 0 ? 1.1 : 0.9);
+    }
+}, { passive: false });
 
 canvas.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || sceneMgr.isDraggingGizmo) return;
+    if (sceneMgr.isDraggingGizmo) return;
+    const info = sceneMgr.getPointerInfo(e.clientX, e.clientY);
+
+    // Disable OrbitControls temporarily when interacting in an ortho quadrant
+    if (sceneMgr.quadView && info.quadrant !== '3d') {
+        sceneMgr.orbit.enabled = false;
+    } else {
+        sceneMgr.orbit.enabled = true;
+    }
+
+    if (e.button === 2 && sceneMgr.quadView && info.quadrant !== '3d') {
+        orthoPanState = { quadrant: info.quadrant, x: e.clientX, y: e.clientY };
+        return;
+    }
+
+    if (e.button !== 0) return;
     pointerDownPos = { x: e.clientX, y: e.clientY };
-    if (appState.selectedJoint) pushUndo();
+
+    // Skeleton Fitting drag in ortho views
+    if (appState.mode === 'skeleton' && appState.fitSkeleton && info.quadrant !== '3d') {
+        sceneMgr.scene.updateMatrixWorld(true);
+        raycaster.setFromCamera(info.ndc, info.camera);
+        const hits = raycaster.intersectObjects(character.markers.filter((m) => m.visible), false);
+        if (hits.length) {
+            fitDragState = {
+                jointName: hits[0].object.userData.joint.userData.baseLabel,
+                quadrant: info.quadrant,
+                lastX: e.clientX,
+                lastY: e.clientY
+            };
+            return;
+        }
+    }
+
+    if (appState.selectedJoint || appState.selectedIK) pushUndo();
+});
+
+window.addEventListener('pointermove', (e) => {
+    if (orthoPanState) {
+        const dx = e.clientX - orthoPanState.x;
+        const dy = e.clientY - orthoPanState.y;
+        orthoPanState.x = e.clientX;
+        orthoPanState.y = e.clientY;
+        const scale = (sceneMgr.orthoZoom * 2) / Math.max(100, canvas.clientHeight * 0.5);
+        sceneMgr.panOrtho(orthoPanState.quadrant, dx * scale, dy * scale);
+        return;
+    }
+    if (fitDragState) {
+        const dxPx = e.clientX - fitDragState.lastX;
+        const dyPx = e.clientY - fitDragState.lastY;
+        fitDragState.lastX = e.clientX;
+        fitDragState.lastY = e.clientY;
+        const scale = (sceneMgr.orthoZoom * 2) / Math.max(100, canvas.clientHeight * 0.5);
+        const dw = dxPx * scale;
+        const dh = -dyPx * scale;
+        if (fitDragState.quadrant === 'front') applySkeletonFitOffset(fitDragState.jointName, dw, dh, 0);
+        else if (fitDragState.quadrant === 'side') applySkeletonFitOffset(fitDragState.jointName, 0, dh, -dw);
+        else if (fitDragState.quadrant === 'top') applySkeletonFitOffset(fitDragState.jointName, dw, 0, -dh);
+    }
 });
 
 canvas.addEventListener('pointerup', (e) => {
+    sceneMgr.orbit.enabled = true;
+    if (orthoPanState) { orthoPanState = null; return; }
+    if (fitDragState) { fitDragState = null; pointerDownPos = null; return; }
+
     if (e.button !== 0 || !pointerDownPos || sceneMgr.isDraggingGizmo) {
         pointerDownPos = null;
         return;
@@ -181,11 +308,18 @@ canvas.addEventListener('pointerup', (e) => {
 
     if (appState.mode !== 'pose') return;
 
-    const rect = canvas.getBoundingClientRect();
-    ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    const info = sceneMgr.getPointerInfo(e.clientX, e.clientY);
     sceneMgr.scene.updateMatrixWorld(true);
-    raycaster.setFromCamera(ndc, sceneMgr.camera);
+    raycaster.setFromCamera(info.ndc, info.camera);
+
+    // 0. Try IK handles first when IK is enabled
+    if (ikMgr.enabled) {
+        const ikHits = raycaster.intersectObjects(ikMgr.handleMeshes, false);
+        if (ikHits.length) {
+            selectIKHandle(ikHits[0].object);
+            return;
+        }
+    }
 
     // 1. Try joint markers first (when visible)
     if (appState.showJoints) {
@@ -196,8 +330,8 @@ canvas.addEventListener('pointerup', (e) => {
         }
     }
 
-    // 2. Try body meshes -> select owning joint
-    const bodyHits = raycaster.intersectObjects(character.bodyMeshes, false);
+    // 2. Try body meshes + attachment meshes -> select owning joint
+    const bodyHits = raycaster.intersectObjects([...character.bodyMeshes, ...character.attachmentMeshes], false);
     if (bodyHits.length && bodyHits[0].object.userData.joint) {
         selectJoint(bodyHits[0].object.userData.joint);
         return;
@@ -294,11 +428,18 @@ const gizmoMoveBtn = document.getElementById('gizmoMoveBtn');
 const gizmoSpaceBtn = document.getElementById('gizmoSpaceBtn');
 
 function updateHUD() {
-    if (appState.mode !== 'pose' || (!appState.selectedJoint && !appState.selectedProp)) {
+    if (appState.mode !== 'pose' || (!appState.selectedJoint && !appState.selectedProp && !appState.selectedIK)) {
         hud.classList.add('hidden');
         return;
     }
     hud.classList.remove('hidden');
+
+    if (appState.selectedIK) {
+        hudTitle.textContent = appState.selectedIK.userData.baseLabel || 'IK Хэндл';
+        hudJointControls.classList.add('hidden');
+        hudPropControls.classList.add('hidden');
+        return;
+    }
 
     if (appState.selectedProp) {
         hudTitle.textContent = appState.selectedProp.userData.propLabel || 'Объект';
@@ -543,8 +684,135 @@ skeletonEditor.bind2DCanvas(
 );
 
 document.getElementById('btnResetSkeleton').addEventListener('click', () => {
+    character.customJointOffsets = {};
     skeletonEditor.resetProportions();
     syncSkeletonSliders();
+});
+
+/* ==================== METRIC RULER, FIT SKELETON & REFERENCE GLB ==================== */
+
+document.getElementById('chkRuler').addEventListener('change', (e) => {
+    refGlbMgr.setRulerVisible(e.target.checked);
+});
+document.getElementById('chkFitSkeleton').addEventListener('change', (e) => {
+    appState.fitSkeleton = e.target.checked;
+});
+document.getElementById('chkFitSym').addEventListener('change', (e) => {
+    appState.fitSym = e.target.checked;
+});
+document.getElementById('btnResetFit').addEventListener('click', () => {
+    character.customJointOffsets = {};
+    character.updateJointPositions(false);
+    skeletonEditor.rebuild3DGuides();
+});
+document.getElementById('chkRefSideBySide').addEventListener('change', (e) => {
+    refGlbMgr.setSideBySide(e.target.checked);
+});
+
+function bindRefSlot(slotKey, suffix) {
+    const fileInput = document.getElementById(`fileRefGlb${suffix}`);
+    const heightInp = document.getElementById(`refHeight${suffix}`);
+    const modeSel = document.getElementById(`refMode${suffix}`);
+    const visChk = document.getElementById(`refVis${suffix}`);
+
+    document.getElementById(`btnLoadRef${suffix}`).addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async (e) => {
+        const f = e.target.files?.[0];
+        e.target.value = '';
+        if (!f) return;
+        try {
+            const h = parseFloat(heightInp.value) || (slotKey === 'male' ? 1.80 : 1.68);
+            await refGlbMgr.loadGlbIntoSlot(slotKey, f, h);
+        } catch (err) {
+            await showMessage(`Ошибка загрузки .glb: ${err.message || err}`, 'Ошибка');
+        }
+    });
+    document.getElementById(`btnAlignRef${suffix}`).addEventListener('click', () => {
+        const h = parseFloat(heightInp.value) || (slotKey === 'male' ? 1.80 : 1.68);
+        refGlbMgr.alignSlotToFeetAndHeight(slotKey, h);
+    });
+    modeSel.addEventListener('change', () => refGlbMgr.applyDisplayMode(slotKey, modeSel.value));
+    visChk.addEventListener('change', () => refGlbMgr.setSlotVisible(slotKey, visChk.checked));
+    document.getElementById(`btnClearRef${suffix}`).addEventListener('click', () => refGlbMgr.clearSlot(slotKey));
+}
+bindRefSlot('male', 'Male');
+bindRefSlot('female', 'Female');
+
+/* ==================== CHARACTER PRESETS & ATTACHMENTS ==================== */
+
+const attJointSelect = document.getElementById('attJointSelect');
+const attTypeSelect = document.getElementById('attTypeSelect');
+const attColorInput = document.getElementById('attColorInput');
+const attachmentsListEl = document.getElementById('attachmentsList');
+
+function populateAttJointSelect() {
+    attJointSelect.innerHTML = '';
+    for (const j of character.joints) {
+        if (j.userData.isFinger) continue;
+        const opt = document.createElement('option');
+        opt.value = j.userData.baseLabel;
+        opt.textContent = j.userData.baseLabel;
+        attJointSelect.appendChild(opt);
+    }
+    attJointSelect.value = 'Сокет Голова';
+}
+
+function renderAttachmentsList() {
+    attachmentsListEl.innerHTML = '';
+    for (const att of character.attachments) {
+        const row = document.createElement('div');
+        row.className = 'prop-item';
+        const span = document.createElement('span');
+        span.textContent = `${att.name} → ${att.jointName}`;
+        const actions = document.createElement('div');
+        actions.style.display = 'flex';
+        actions.style.gap = '4px';
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'mini-btn';
+        editBtn.title = 'Редактировать точки меша';
+        editBtn.innerHTML = '<span class="material-icons sm">edit</span>';
+        editBtn.addEventListener('click', () => shapeEditor.openAttachment(att.id));
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'prop-del';
+        delBtn.innerHTML = '<span class="material-icons sm">close</span>';
+        delBtn.addEventListener('click', () => {
+            character.removeAttachment(att.id);
+            renderAttachmentsList();
+        });
+
+        actions.append(editBtn, delBtn);
+        row.append(span, actions);
+        attachmentsListEl.appendChild(row);
+    }
+}
+
+document.getElementById('btnAddAttachment').addEventListener('click', () => {
+    const jName = attJointSelect.value || 'Грудь';
+    const type = attTypeSelect.value || 'box';
+    const color = attColorInput.value || '#4f6d9a';
+    const att = character.addAttachment(jName, type, { color });
+    renderAttachmentsList();
+    shapeEditor.openAttachment(att.id);
+});
+
+document.querySelectorAll('[data-char-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        const preset = CHARACTER_PRESETS.find((p) => p.id === btn.dataset.charPreset);
+        if (!preset) return;
+        document.querySelectorAll('[data-char-preset]').forEach((b) => b.classList.toggle('active', b === btn));
+        character.setBodyPreset(preset.bodyPreset);
+        character.setAttachmentList(preset.buildAttachments());
+        document.querySelectorAll('[data-body-preset]').forEach((b) => b.classList.toggle('active', b.dataset.bodyPreset === preset.bodyPreset));
+        syncMorphSliders();
+        syncSkeletonSliders();
+        renderAttachmentsList();
+    });
+});
+
+document.getElementById('chkBallJoints').addEventListener('change', (e) => {
+    character.setBallJointsVisible(e.target.checked);
 });
 
 /* ==================== SHAPE & PRESETS UI ==================== */
@@ -641,10 +909,43 @@ const btnPip = document.getElementById('btnPip');
 sceneMgr.pip.viewportEl = pipViewportEl;
 
 function syncPipVisibility() {
-    const show = sceneMgr.pip.enabled && sceneMgr.sketch.settings.mode === '3d';
+    const show = sceneMgr.pip.enabled && sceneMgr.sketch.settings.mode === '3d' && !sceneMgr.quadView;
     sketchPipEl.classList.toggle('hidden', !show);
     btnPip.classList.toggle('active', sceneMgr.pip.enabled);
 }
+
+const quadLabelsEl = document.getElementById('quadLabels');
+document.getElementById('btnQuadView').addEventListener('click', (e) => {
+    const next = !sceneMgr.quadView;
+    sceneMgr.setQuadView(next);
+    e.currentTarget.classList.toggle('active', next);
+    quadLabelsEl.classList.toggle('hidden', !next);
+    syncPipVisibility();
+});
+
+document.getElementById('btnIK').addEventListener('click', (e) => {
+    const next = !ikMgr.enabled;
+    ikMgr.setEnabled(next);
+    e.currentTarget.classList.toggle('active', next);
+    if (!next && appState.selectedIK) selectJoint(null);
+});
+
+document.getElementById('btnPinFeet').addEventListener('click', (e) => {
+    const next = !ikMgr.pinFeet;
+    if (next && !ikMgr.enabled) {
+        ikMgr.setEnabled(true);
+        document.getElementById('btnIK').classList.add('active');
+    }
+    ikMgr.setPinFeet(next);
+    e.currentTarget.classList.toggle('active', next);
+});
+
+document.getElementById('btnAnimDock').addEventListener('click', (e) => {
+    const dock = document.getElementById('animDock');
+    const willShow = dock.classList.contains('hidden');
+    dock.classList.toggle('hidden', !willShow);
+    e.currentTarget.classList.toggle('active', willShow);
+});
 
 btnPip.addEventListener('click', () => {
     sceneMgr.pip.enabled = !sceneMgr.pip.enabled;
@@ -759,7 +1060,7 @@ function exportPNGFrame() {
     const exportMode = prevMode === '3d' ? 'sketch-tone' : prevMode;
     sceneMgr.sketch.settings.mode = exportMode;
     const dataUrl = sceneMgr.exportFramePNG(
-        character.markers,
+        [...character.markers, ...ikMgr.handleMeshes, ...refGlbMgr.getHelperObjects()],
         character.guideLines,
         character.showConstructionGuides,
         1600,
@@ -774,6 +1075,16 @@ function exportPNGFrame() {
 }
 
 document.getElementById('btnExportPng').addEventListener('click', exportPNGFrame);
+
+function exportGameJSON() {
+    const payload = {
+        format: 'pose_ref_game_v1',
+        exportedAt: new Date().toISOString(),
+        character: character.exportCharacterJSON('game_character'),
+        animations: animEngine.clips
+    };
+    downloadJSON(payload, `game_character_${Date.now()}.json`);
+}
 
 function exportGLB() {
     const exporter = new GLTFExporter();
@@ -856,11 +1167,17 @@ document.getElementById('browserClose').addEventListener('click', () => browserM
 document.getElementById('browserCancel').addEventListener('click', () => browserModal.classList.add('hidden'));
 
 async function openBrowser(type) {
-    const titles = { models: 'Сохранённые персонажи', poses: 'Библиотека поз', presets: 'Пресеты поз' };
+    const titles = {
+        models: 'Сохранённые персонажи',
+        poses: 'Библиотека поз',
+        presets: 'Пресеты поз',
+        animations: 'Сохранённые анимации'
+    };
     const hints = {
         models: 'Папка: library/models/',
         poses: 'Файл: library/poses.json',
-        presets: 'Папка: pose_presets/'
+        presets: 'Папка: pose_presets/',
+        animations: 'Папка: library/animations/'
     };
     browserTitle.textContent = titles[type] || 'Библиотека';
     browserHint.textContent = hints[type] || '';
@@ -899,9 +1216,19 @@ async function openBrowser(type) {
             if (type === 'models') {
                 character.importCharacterJSON(r.data);
                 if (r.data.props) propsMgr.deserialize(r.data.props);
+                if (Array.isArray(r.data.animations)) animEngine.clips = r.data.animations;
                 syncSkeletonSliders();
                 syncMorphSliders();
                 renderPropsList();
+                renderAttachmentsList();
+                animUI.refresh();
+            } else if (type === 'animations') {
+                const clip = r.data;
+                if (clip && Array.isArray(clip.keyframes)) {
+                    animEngine.clips.push(clip);
+                    animEngine.setActiveClip(clip.id);
+                    animUI.refresh();
+                }
             } else {
                 pushUndo();
                 character.applyPoseData(r.data.joints || r.data.data || r.data, true);
@@ -992,6 +1319,9 @@ document.querySelectorAll('#menuFile .menu-list button').forEach((btn) => {
             case 'export-glb':
                 exportGLB();
                 break;
+            case 'export-game-json':
+                exportGameJSON();
+                break;
             case 'bg':
                 document.getElementById('fileBg').click();
                 break;
@@ -1028,11 +1358,16 @@ document.getElementById('fileModel').addEventListener('change', (e) => {
     reader.onload = () => {
         try {
             const data = JSON.parse(reader.result);
-            character.importCharacterJSON(data);
+            character.importCharacterJSON(data.character || data);
             if (data.props) propsMgr.deserialize(data.props);
+            if (Array.isArray(data.animations)) {
+                animEngine.clips = data.animations;
+                animUI.refresh();
+            }
             syncSkeletonSliders();
             syncMorphSliders();
             renderPropsList();
+            renderAttachmentsList();
             updateHUD();
         } catch (err) {
             showMessage(`Ошибка модели: ${err.message}`);
@@ -1105,12 +1440,32 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
+document.getElementById('animSaveServer').addEventListener('click', async () => {
+    const clip = animEngine.getActiveClip();
+    if (!clip) return;
+    const name = await showPrompt('Имя анимации:', clip.name || `anim_${Date.now()}`, 'Сохранить анимацию');
+    if (!name) return;
+    if (await checkServer()) {
+        const res = await apiPost(`/api/animations/save/${encodeURIComponent(name)}`, clip);
+        await showMessage(res && res.ok ? `Анимация сохранена: ${name}` : `Ошибка: ${res.error}`, 'Анимация');
+    } else {
+        downloadJSON(clip, `${name}.json`);
+    }
+});
+
+document.getElementById('animLoadServer').addEventListener('click', async () => {
+    if (await checkServer()) openBrowser('animations');
+    else showMessage('Сервер недоступен — сохранение/загрузка доступна локально через JSON.', 'Анимация');
+});
+
 /* ==================== INIT & RENDER LOOP ==================== */
 
 buildTree();
 renderPoseMenu();
 buildSkeletonSliders();
 buildShapePartsButtons();
+populateAttJointSelect();
+renderAttachmentsList();
 syncMorphSliders();
 sceneMgr.resize();
 checkServer();
@@ -1122,8 +1477,17 @@ window.addEventListener('resize', () => sceneMgr.resize());
 
 let frames = 0;
 let lastFps = performance.now();
+let lastFrameTime = performance.now();
 function animate(now) {
     requestAnimationFrame(animate);
+    const dt = Math.min(0.1, (now - lastFrameTime) / 1000);
+    lastFrameTime = now;
+
+    if (animEngine.playing) {
+        animEngine.update(dt);
+        animUI.tick();
+    }
+
     frames++;
     if (now - lastFps >= 500) {
         fpsEl.textContent = `${Math.round((frames * 1000) / (now - lastFps))} FPS`;
@@ -1131,7 +1495,7 @@ function animate(now) {
         lastFps = now;
     }
     sceneMgr.render(
-        [...character.markers, skeletonEditor.guidesGroup],
+        [...character.markers, skeletonEditor.guidesGroup, ...ikMgr.handleMeshes, ...refGlbMgr.getHelperObjects()],
         character.guideLines,
         character.showConstructionGuides
     );

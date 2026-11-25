@@ -94,6 +94,19 @@ export const MIRROR_PAIRS = [
     ['Носок L', 'Носок R']
 ];
 
+export const SOCKET_NAMES = [
+    'Сокет Голова',
+    'Сокет Кисть R',
+    'Сокет Кисть L',
+    'Сокет Спина'
+];
+
+export const CLOAK_JOINTS = [
+    'Плащ 1',
+    'Плащ 2',
+    'Плащ 3'
+];
+
 export const PART_GROUP_LABELS = {
     'Таз': 'Таз (овал)',
     'Живот': 'Живот (шарнир)',
@@ -107,12 +120,15 @@ export const PART_GROUP_LABELS = {
     'Бедро L': 'Бедро L',
     'Колено L': 'Голень L',
     'Стопа L': 'Стопа L',
-    'Носок L': 'Пальцы стопы L'
+    'Носок L': 'Пальцы стопы L',
+    'Плащ 1': 'Плащ (верх)',
+    'Плащ 2': 'Плащ (середина)',
+    'Плащ 3': 'Плащ (низ)'
 };
 
 /**
  * Compute world/local joint offsets from proportions.
- * Keeps feet planted cleanly near Y = 0 in rest pose.
+ * 1.00 unit = 1.00 meter. Keeps feet planted cleanly near Y = 0 in rest pose.
  */
 export function computeRigOffsets(p) {
     const s = p.heightScale || 1.0;
@@ -149,6 +165,7 @@ export function computeRigOffsets(p) {
         footHeight: footH,
         pelvisHeight: pelvH,
         abdomenHeight: abdH,
-        chestHeight: chestH
+        chestHeight: chestH,
+        cloakSegLen: 0.34 * s
     };
 }

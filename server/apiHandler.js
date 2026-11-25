@@ -6,11 +6,12 @@ const RESERVED = ['list', 'load', 'save', 'delete', 'backup'];
 export function createApiHandler(rootDir) {
     const LIBRARY_DIR = path.join(rootDir, 'library');
     const MODELS_DIR = path.join(LIBRARY_DIR, 'models');
+    const ANIMATIONS_DIR = path.join(LIBRARY_DIR, 'animations');
     const POSES_FILE = path.join(LIBRARY_DIR, 'poses.json');
     const POSES_BAK_FILE = path.join(LIBRARY_DIR, 'poses.bak');
     const PRESETS_DIR = path.join(rootDir, 'pose_presets');
 
-    [LIBRARY_DIR, MODELS_DIR, PRESETS_DIR].forEach((dir) => {
+    [LIBRARY_DIR, MODELS_DIR, ANIMATIONS_DIR, PRESETS_DIR].forEach((dir) => {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     });
     if (!fs.existsSync(POSES_FILE)) fs.writeFileSync(POSES_FILE, '{}', 'utf8');
@@ -283,6 +284,53 @@ export function createApiHandler(rootDir) {
                 return true;
             }
             sendJson(res, 404, { ok: false, error: 'unknown presets action' });
+            return true;
+        }
+
+        if (resource === 'animations') {
+            if (action === 'list' && req.method === 'GET') {
+                sendJson(res, 200, { ok: true, list: listJsonFiles(ANIMATIONS_DIR) });
+                return true;
+            }
+            if (action === 'load' && req.method === 'GET' && rawName) {
+                const name = safeName(rawName);
+                const file = path.join(ANIMATIONS_DIR, `${name}.json`);
+                if (!fs.existsSync(file)) {
+                    sendJson(res, 404, { ok: false, error: 'not found' });
+                    return true;
+                }
+                sendJson(res, 200, { ok: true, name, data: readJsonFile(file, null) });
+                return true;
+            }
+            if (action === 'save' && req.method === 'POST' && rawName) {
+                try {
+                    const body = await readBody(req, 10 * 1024 * 1024);
+                    JSON.parse(body);
+                    const name = safeName(rawName);
+                    const file = path.join(ANIMATIONS_DIR, `${name}.json`);
+                    fs.writeFileSync(file, body, 'utf8');
+                    sendJson(res, 200, { ok: true, name });
+                } catch (e) {
+                    sendJson(res, 400, { ok: false, error: e.message });
+                }
+                return true;
+            }
+            if (action === 'delete' && req.method === 'DELETE' && rawName) {
+                const name = safeName(rawName);
+                const file = path.join(ANIMATIONS_DIR, `${name}.json`);
+                if (!fs.existsSync(file)) {
+                    sendJson(res, 404, { ok: false, error: 'not found' });
+                    return true;
+                }
+                try {
+                    fs.unlinkSync(file);
+                    sendJson(res, 200, { ok: true });
+                } catch (e) {
+                    sendJson(res, 500, { ok: false, error: e.message });
+                }
+                return true;
+            }
+            sendJson(res, 404, { ok: false, error: 'unknown animations action' });
             return true;
         }
 

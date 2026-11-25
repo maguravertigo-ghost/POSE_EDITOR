@@ -4,7 +4,9 @@ import {
     buildBufferGeometryFromQuadMesh,
     cloneEditableMesh,
     createBoxGridMesh,
+    createQuadConeMesh,
     createQuadCylinderMesh,
+    createQuadPlateMesh,
     createQuadSphereMesh
 } from '../core/subdivMesh.js';
 import { applyAnatomicalMorph, createAnatomicalMeshes } from '../core/anatomicalMeshes.js';
@@ -93,6 +95,10 @@ export class ShapeEditorModal {
             this.draw2DViews();
             this.update3DPreview();
         });
+        const ringBtn = document.getElementById('shapeSelectRing');
+        if (ringBtn) {
+            ringBtn.addEventListener('click', () => this.selectRingFromSelected());
+        }
         document.getElementById('shapeApplyPrimitive').addEventListener('click', () => this._replaceWithPrimitive());
 
         document.querySelectorAll('[data-pane-mode]').forEach((btn) => {
@@ -163,6 +169,7 @@ export class ShapeEditorModal {
         if (key.endsWith(' R')) key = key.slice(0, -2) + ' L';
         if (!this.character.cages[key]) return false;
 
+        this.editingAttachmentId = null;
         this.activePart = partName;
         this.canonicalKey = key;
         this.workingMesh = cloneEditableMesh(this.character.cages[key]);
@@ -183,6 +190,44 @@ export class ShapeEditorModal {
         this._frameCamera3D();
         this._startLoop3D();
         return true;
+    }
+
+    openAttachment(attachmentId) {
+        const att = this.character.getAttachmentById(attachmentId);
+        if (!att) return false;
+        this.editingAttachmentId = att.id;
+        this.activePart = att.jointName;
+        this.canonicalKey = null;
+        this.workingMesh = cloneEditableMesh(att.meshData);
+        this.workingMesh.subdiv = att.meshData.subdiv ?? 0;
+        this.selectedVerts.clear();
+        this.partScale = 1.0;
+        this.scaleEl.value = '1';
+        this.scaleValEl.textContent = '1.00';
+        this.subdivEl.value = String(this.workingMesh.subdiv);
+        this.partTitleEl.textContent = `Элемент: ${att.name} (${att.jointName})`;
+        this.symXEl.checked = false;
+        this.symZEl.checked = false;
+
+        this.modal.classList.remove('hidden');
+        this.resize();
+        this._frameCamera3D();
+        this._startLoop3D();
+        return true;
+    }
+
+    selectRingFromSelected() {
+        if (!this.workingMesh || this.selectedVerts.size === 0) return;
+        const axisIdx = this.workingMesh.axis === 'x' ? 0 : (this.workingMesh.axis === 'z' ? 2 : 1);
+        const refVals = Array.from(this.selectedVerts).map((idx) => this.workingMesh.verts[idx][axisIdx]);
+        for (let i = 0; i < this.workingMesh.verts.length; i++) {
+            const v = this.workingMesh.verts[i][axisIdx];
+            if (refVals.some((rv) => Math.abs(rv - v) < 0.014)) {
+                this.selectedVerts.add(i);
+            }
+        }
+        this.draw2DViews();
+        this.update3DPreview();
     }
 
     close() {
@@ -229,10 +274,14 @@ export class ShapeEditorModal {
         } else if (prim === 'cylinder') {
             if (axis === 'y') {
                 const isUp = ['Голова', 'Грудь', 'Живот', 'Таз', 'Шея'].includes(this.canonicalKey);
-                created = createQuadCylinderMesh(0.06, 0.055, isUp ? 0 : 0, isUp ? boneLen : -boneLen, 8, 4);
+                created = createQuadCylinderMesh(0.06, 0.055, 0, isUp ? boneLen : -boneLen, 8, 4);
             } else {
                 created = createQuadCylinderMesh(0.055, 0.055, 0, -boneLen, 8, 4);
             }
+        } else if (prim === 'cone') {
+            created = createQuadConeMesh(0.10, 0.015, boneLen, 8, 4);
+        } else if (prim === 'plate') {
+            created = createQuadPlateMesh(0.24, boneLen, 0.018, 3, 3);
         } else {
             const cy = ['Голова', 'Грудь', 'Живот', 'Шея'].includes(this.canonicalKey) ? boneLen * 0.5 : (this.canonicalKey === 'Таз' ? 0 : -boneLen * 0.5);
             created = createQuadSphereMesh(0.08, boneLen * 0.5, 0.08, 2, [0, cy, 0]);
@@ -248,7 +297,19 @@ export class ShapeEditorModal {
     }
 
     apply() {
-        if (!this.canonicalKey || !this.workingMesh) return;
+        if (!this.workingMesh) return;
+        if (this.editingAttachmentId) {
+            const att = this.character.getAttachmentById(this.editingAttachmentId);
+            if (att) {
+                att.meshData = cloneEditableMesh(this.workingMesh);
+                att.meshData.subdiv = parseInt(this.subdivEl.value, 10) || 0;
+                this.character.rebuildAttachments();
+            }
+            this.close();
+            if (this.onApplied) this.onApplied(this.editingAttachmentId);
+            return;
+        }
+        if (!this.canonicalKey) return;
         this.character.cages[this.canonicalKey] = cloneEditableMesh(this.workingMesh);
         this.character.globalSubdiv = parseInt(this.subdivEl.value, 10) || 0;
         this.character.rebuildPartMesh(this.canonicalKey);
@@ -628,12 +689,13 @@ export class ShapeEditorModal {
 
     update3DPreview() {
         if (!this.workingMesh) return;
-        const boneLen = this.character.getBoneLengthForPart(this.canonicalKey);
+        const boneLen = this.canonicalKey ? this.character.getBoneLengthForPart(this.canonicalKey) : null;
+        const morphFn = this.canonicalKey ? ((pName, v) => applyAnatomicalMorph(this.character.morph, pName, v)) : null;
         const geo = buildBufferGeometryFromQuadMesh(
             this.workingMesh,
             boneLen,
-            (pName, v) => applyAnatomicalMorph(this.character.morph, pName, v),
-            this.canonicalKey
+            morphFn,
+            this.canonicalKey || 'attachment'
         );
 
         this.mesh3D.geometry.dispose();
@@ -645,7 +707,7 @@ export class ShapeEditorModal {
         const axis = this.workingMesh.axis || 'y';
 
         const displayVerts = this.workingMesh.verts.map((v) => {
-            const mv = applyAnatomicalMorph(this.character.morph, this.canonicalKey, v);
+            const mv = morphFn ? morphFn(this.canonicalKey, v) : v;
             return [
                 axis === 'x' ? mv[0] * ratio : mv[0],
                 axis === 'y' ? mv[1] * ratio : mv[1],

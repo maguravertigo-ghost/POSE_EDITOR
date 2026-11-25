@@ -9,12 +9,22 @@ import {
     buildBufferGeometryFromQuadMesh,
     buildFingerGeometry,
     cloneEditableMesh,
+    createPrimitiveByType,
     mirrorEditableMeshX
 } from './subdivMesh.js';
 import {
     applyAnatomicalMorph,
     createAnatomicalMeshes
 } from './anatomicalMeshes.js';
+
+const BALL_JOINT_RADII = {
+    'Плечо': 0.038,
+    'Локоть': 0.029,
+    'Кисть': 0.020,
+    'Бедро': 0.056,
+    'Колено': 0.042,
+    'Стопа': 0.028
+};
 
 export class CharacterRig {
     constructor(scene) {
@@ -27,13 +37,19 @@ export class CharacterRig {
         this.morph = { gender: 'neutral', weight: 0.0, muscle: 0.1 };
         this.cages = createAnatomicalMeshes();
         this.globalSubdiv = 2;
+        this.customJointOffsets = {}; // { jointName: [dx, dy, dz] } for skeleton fitting
+        this.attachments = []; // [{ id, jointName, name, type, pos, rot, scale, color, meshData }]
 
         this.joints = [];
         this.jointByName = {};
+        this.sockets = {};
         this.markers = [];
+        this.ballJoints = [];
         this.bodyMeshes = [];
+        this.attachmentMeshes = [];
         this.guideLines = [];
         this.showConstructionGuides = true;
+        this.showBallJoints = true;
 
         this.materials = {
             skin: new THREE.MeshStandardMaterial({ color: 0xe6dcd0, roughness: 0.72, metalness: 0.02 }),
@@ -41,7 +57,9 @@ export class CharacterRig {
             pelvis: new THREE.MeshStandardMaterial({ color: 0x9aa4b8, roughness: 0.78, metalness: 0.02 }),
             limbs: new THREE.MeshStandardMaterial({ color: 0xe0d5c5, roughness: 0.72, metalness: 0.02 }),
             shoe: new THREE.MeshStandardMaterial({ color: 0x525b6e, roughness: 0.65, metalness: 0.04 }),
+            jointBall: new THREE.MeshStandardMaterial({ color: 0xd4cbbd, roughness: 0.68, metalness: 0.04 }),
             marker: new THREE.MeshBasicMaterial({ color: 0xff9944, depthTest: true, depthWrite: false }),
+            socketMarker: new THREE.MeshBasicMaterial({ color: 0x3ddc97, wireframe: true }),
             guideLine: new THREE.LineBasicMaterial({
                 color: 0x3b4458,
                 transparent: true,
@@ -62,6 +80,8 @@ export class CharacterRig {
         g.userData.isFinger = !!options.isFinger;
         g.userData.fingerInfo = options.fingerInfo || null;
         g.userData.isRoot = !!options.isRoot;
+        g.userData.isCloak = !!options.isCloak;
+        g.userData.isSocket = !!options.isSocket;
         parent.add(g);
 
         const shapeGroup = new THREE.Group();
@@ -69,14 +89,38 @@ export class CharacterRig {
         g.add(shapeGroup);
         g.userData.shapeGroup = shapeGroup;
 
+        const attachGroup = new THREE.Group();
+        attachGroup.userData.isAttachGroup = true;
+        g.add(attachGroup);
+        g.userData.attachGroup = attachGroup;
+
         const guideGroup = new THREE.Group();
         guideGroup.userData.isConstructionGuide = true;
         g.add(guideGroup);
         g.userData.guideGroup = guideGroup;
 
-        const markerMat = this.materials.marker.clone();
+        // Visible articulated ball joint for classic artist-mannequin silhouette
+        const baseName = name.replace(/ [LR]$/, '');
+        if (BALL_JOINT_RADII[baseName]) {
+            const ballGeo = new THREE.SphereGeometry(BALL_JOINT_RADII[baseName], 16, 12);
+            const ball = new THREE.Mesh(ballGeo, this.materials.jointBall);
+            ball.castShadow = true;
+            ball.receiveShadow = true;
+            ball.userData.joint = g;
+            ball.userData.isBallJoint = true;
+            ball.userData.baseRadius = BALL_JOINT_RADII[baseName];
+            shapeGroup.add(ball);
+            g.userData.ballJoint = ball;
+            this.ballJoints.push(ball);
+            this.bodyMeshes.push(ball);
+        }
+
+        const markerMat = options.isSocket ? this.materials.socketMarker.clone() : this.materials.marker.clone();
         const radius = options.isFinger ? 0.008 : (options.markerRadius || 0.026);
-        const marker = new THREE.Mesh(new THREE.SphereGeometry(radius, 12, 8), markerMat);
+        const markerGeo = options.isSocket
+            ? new THREE.OctahedronGeometry(0.022, 0)
+            : new THREE.SphereGeometry(radius, 12, 8);
+        const marker = new THREE.Mesh(markerGeo, markerMat);
         marker.userData.isMarker = true;
         marker.userData.joint = g;
         marker.renderOrder = 20;
@@ -86,6 +130,7 @@ export class CharacterRig {
         this.markers.push(marker);
         this.joints.push(g);
         this.jointByName[name] = g;
+        if (options.isSocket) this.sockets[name] = g;
         return g;
     }
 
@@ -116,6 +161,15 @@ export class CharacterRig {
         const head = this._makeJoint(neck, 'Голова', { cageKey: 'Голова', markerRadius: 0.024 });
         this._addMesh(head, this.materials.skin);
 
+        // Equipment Sockets
+        this._makeJoint(head, 'Сокет Голова', { isSocket: true, markerRadius: 0.018 });
+        this._makeJoint(chest, 'Сокет Спина', { isSocket: true, markerRadius: 0.018 });
+
+        // Articulated Cloak Chain on back of Chest
+        const cloak1 = this._makeJoint(chest, 'Плащ 1', { isCloak: true, markerRadius: 0.018 });
+        const cloak2 = this._makeJoint(cloak1, 'Плащ 2', { isCloak: true, markerRadius: 0.018 });
+        this._makeJoint(cloak2, 'Плащ 3', { isCloak: true, markerRadius: 0.018 });
+
         const buildArm = (side) => {
             const clav = this._makeJoint(chest, `Ключица ${side}`, { cageKey: `Ключица ${side}`, markerRadius: 0.022 });
             this._addMesh(clav, this.materials.torso);
@@ -128,6 +182,7 @@ export class CharacterRig {
 
             const hand = this._makeJoint(elbow, `Кисть ${side}`, { cageKey: `Кисть ${side}`, markerRadius: 0.018 });
             this._addMesh(hand, this.materials.skin);
+            this._makeJoint(hand, `Сокет Кисть ${side}`, { isSocket: true, markerRadius: 0.014 });
 
             const fingerSpecs = [
                 { name: `Большой ${side}`, len1: 0.030, len2: 0.025, r: 0.0085, isThumb: true },
@@ -267,6 +322,25 @@ export class CharacterRig {
             j[`Колено ${side}`].position.set(0, -o.thighLen, 0);
             j[`Стопа ${side}`].position.set(0, -o.shinLen, 0);
             j[`Носок ${side}`].position.set(0, -o.footHeight * 0.72, o.footLen * 0.58);
+            if (j[`Сокет Кисть ${side}`]) {
+                j[`Сокет Кисть ${side}`].position.set(-sign * 0.014 * handScale, -o.handLen * 0.55, 0.014 * handScale);
+            }
+        }
+
+        // Sockets & Cloak chain positions
+        if (j['Сокет Голова']) j['Сокет Голова'].position.set(0, o.headSize * 0.92, 0);
+        if (j['Сокет Спина']) j['Сокет Спина'].position.set(0, o.chestHeight * 0.55, -0.105 * o.scale);
+        if (j['Плащ 1']) j['Плащ 1'].position.set(0, o.chestHeight * 0.88, -0.092 * o.scale);
+        if (j['Плащ 2']) j['Плащ 2'].position.set(0, -o.cloakSegLen, -0.012);
+        if (j['Плащ 3']) j['Плащ 3'].position.set(0, -o.cloakSegLen, -0.012);
+
+        // Apply custom rest-pose joint fitting offsets (if any)
+        for (const [jName, delta] of Object.entries(this.customJointOffsets || {})) {
+            const jnt = j[jName];
+            if (!jnt || !Array.isArray(delta)) continue;
+            jnt.position.x += delta[0] || 0;
+            jnt.position.y += delta[1] || 0;
+            jnt.position.z += delta[2] || 0;
         }
     }
 
@@ -379,6 +453,14 @@ export class CharacterRig {
                 waistPts.push(new THREE.Vector3(Math.cos(ang) * size.x * 0.45, center.y, center.z + Math.sin(ang) * size.z * 0.48));
             }
             addLoop(waistPts);
+            // Navel marker dot on front
+            const navelPts = [];
+            const nr = 0.005;
+            for (let i = 0; i <= 12; i++) {
+                const ang = (i / 12) * Math.PI * 2;
+                navelPts.push(new THREE.Vector3(Math.cos(ang) * nr, box.min.y + size.y * 0.25 + Math.sin(ang) * nr, box.max.z * 1.01));
+            }
+            addLoop(navelPts);
         } else if (name === 'Таз') {
             // V-cut briefs/pelvis guide + iliac belt ring + centerline
             addLoop([
@@ -453,6 +535,14 @@ export class CharacterRig {
         );
         if (oldGeo) oldGeo.dispose();
 
+        if (joint.userData.ballJoint) {
+            const wFactor = 1 + (this.morph.weight || 0) * 0.22 + (this.morph.muscle || 0) * 0.12;
+            const gScale = this.morph.gender === 'female' ? 0.90 : (this.morph.gender === 'male' ? 1.03 : 0.98);
+            const s = (offsets.scale || 1.0) * wFactor * gScale;
+            joint.userData.ballJoint.scale.setScalar(s);
+            joint.userData.ballJoint.visible = this.showBallJoints;
+        }
+
         this._rebuildConstructionGuidesForPart(joint);
     }
 
@@ -460,11 +550,88 @@ export class CharacterRig {
         for (const joint of this.joints) {
             this.rebuildPartMesh(joint.userData.baseLabel);
         }
+        this.rebuildAttachments();
     }
 
     rebuildGeometryAndLayout(resetRootHeight = false) {
         this.updateJointPositions(resetRootHeight);
         this.rebuildAllMeshes();
+    }
+
+    setBallJointsVisible(visible) {
+        this.showBallJoints = visible;
+        for (const b of this.ballJoints) {
+            b.visible = visible;
+        }
+    }
+
+    setAttachmentList(list) {
+        this.attachments = (list || []).map((a) => ({
+            ...a,
+            pos: [...(a.pos || [0, 0, 0])],
+            rot: [...(a.rot || [0, 0, 0])],
+            scale: [...(a.scale || [1, 1, 1])],
+            meshData: a.meshData ? cloneEditableMesh(a.meshData) : createPrimitiveByType(a.type || 'box')
+        }));
+        this.rebuildAttachments();
+    }
+
+    addAttachment(jointName, type = 'box', options = {}) {
+        const id = options.id || `att_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const att = {
+            id,
+            jointName,
+            name: options.name || `${type} (${jointName})`,
+            type,
+            pos: options.pos ? [...options.pos] : [0, 0, 0],
+            rot: options.rot ? [...options.rot] : [0, 0, 0],
+            scale: options.scale ? [...options.scale] : [1, 1, 1],
+            color: options.color || '#7c8aa6',
+            meshData: options.meshData ? cloneEditableMesh(options.meshData) : createPrimitiveByType(type)
+        };
+        this.attachments.push(att);
+        this.rebuildAttachments();
+        return att;
+    }
+
+    removeAttachment(id) {
+        this.attachments = this.attachments.filter((a) => a.id !== id);
+        this.rebuildAttachments();
+    }
+
+    getAttachmentById(id) {
+        return this.attachments.find((a) => a.id === id) || null;
+    }
+
+    rebuildAttachments() {
+        for (const m of this.attachmentMeshes) {
+            if (m.parent) m.parent.remove(m);
+            if (m.geometry) m.geometry.dispose();
+            if (m.material) m.material.dispose();
+        }
+        this.attachmentMeshes = [];
+
+        for (const att of this.attachments) {
+            const joint = this.jointByName[att.jointName];
+            if (!joint || !joint.userData.attachGroup) continue;
+            const mat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(att.color || '#7c8aa6'),
+                roughness: 0.72,
+                metalness: 0.08
+            });
+            const data = { ...att.meshData, subdiv: att.meshData.subdiv ?? 0 };
+            const geo = buildBufferGeometryFromQuadMesh(data, null, null, att.name);
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.position.set(att.pos[0], att.pos[1], att.pos[2]);
+            mesh.rotation.set(att.rot[0], att.rot[1], att.rot[2]);
+            mesh.scale.set(att.scale[0], att.scale[1], att.scale[2]);
+            mesh.userData.joint = joint;
+            mesh.userData.attachmentId = att.id;
+            joint.userData.attachGroup.add(mesh);
+            this.attachmentMeshes.push(mesh);
+        }
     }
 
     setSubdivLevel(level) {
@@ -580,13 +747,13 @@ export class CharacterRig {
         }
     }
 
-    exportCharacterJSON(name = 'character') {
+    exportCharacterJSON(name = 'character', extra = {}) {
         const meshes = {};
         for (const [k, v] of Object.entries(this.cages)) {
             meshes[k] = cloneEditableMesh(v);
         }
         return {
-            version: 6,
+            version: 7,
             type: 'character',
             face_dir: '+Z',
             name,
@@ -594,8 +761,18 @@ export class CharacterRig {
             proportions: { ...this.proportions },
             morph: { ...this.morph },
             subdiv: this.globalSubdiv,
+            showBallJoints: this.showBallJoints,
+            customJointOffsets: { ...this.customJointOffsets },
             meshes,
-            pose: this.getPoseData()
+            attachments: this.attachments.map((a) => ({
+                ...a,
+                pos: [...a.pos],
+                rot: [...a.rot],
+                scale: [...a.scale],
+                meshData: cloneEditableMesh(a.meshData)
+            })),
+            pose: this.getPoseData(),
+            ...extra
         };
     }
 
@@ -604,6 +781,8 @@ export class CharacterRig {
         if (data.proportions) this.proportions = { ...DEFAULT_PROPORTIONS, ...data.proportions };
         if (data.morph) this.morph = { ...this.morph, ...data.morph };
         if (data.subdiv != null) this.globalSubdiv = data.subdiv;
+        if (data.showBallJoints != null) this.showBallJoints = !!data.showBallJoints;
+        this.customJointOffsets = data.customJointOffsets ? { ...data.customJointOffsets } : {};
         if (data.meshes) {
             const base = createAnatomicalMeshes();
             for (const [k, v] of Object.entries(data.meshes)) {
@@ -612,6 +791,11 @@ export class CharacterRig {
                 }
             }
             this.cages = base;
+        }
+        if (Array.isArray(data.attachments)) {
+            this.setAttachmentList(data.attachments);
+        } else {
+            this.setAttachmentList([]);
         }
         this.rebuildGeometryAndLayout(true);
         if (data.pose) this.applyPoseData(data.pose, true);

@@ -334,6 +334,30 @@ export function buildBufferGeometryFromQuadMesh(meshData, boneLength, morphFn, p
     return geo;
 }
 
+export function createQuadConeMesh(rBase = 0.11, rTip = 0.012, height = 0.28, radialSegs = 8, heightSegs = 4) {
+    const m = createQuadCylinderMesh(rTip, rBase, 0, height, radialSegs, heightSegs);
+    m.axis = 'y';
+    m.refLength = height;
+    m.subdiv = 1;
+    return m;
+}
+
+export function createQuadPlateMesh(w = 0.28, h = 0.22, thickness = 0.016, sx = 3, sy = 3) {
+    const m = createBoxGridMesh(w, h, thickness, sx, sy, 1, [0, -h * 0.5, 0]);
+    m.axis = 'y';
+    m.refLength = h;
+    m.subdiv = 1;
+    return m;
+}
+
+export function createPrimitiveByType(type) {
+    if (type === 'box') return createBoxGridMesh(0.18, 0.24, 0.18, 2, 3, 2, [0, 0, 0]);
+    if (type === 'sphere') return createQuadSphereMesh(0.10, 0.12, 0.10, 2, [0, 0, 0]);
+    if (type === 'cone') return createQuadConeMesh(0.11, 0.012, 0.26, 8, 3);
+    if (type === 'plate') return createQuadPlateMesh(0.24, 0.22, 0.018, 3, 3);
+    return createQuadCylinderMesh(0.06, 0.06, 0.14, -0.14, 8, 4);
+}
+
 export function buildFingerGeometry(length, radius) {
     const r = radius;
     const cyl = Math.max(0.002, length - r * 1.4);
